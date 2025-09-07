@@ -1,89 +1,79 @@
-name: Jor3a-Ti9niya-RDP-noVNC-Cloudflare
+name: RDP + noVNC + Cloudflare Tunnel
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-rdp-novnc-tunnel:
+  setup-rdp-novnc:
     runs-on: windows-latest
 
     steps:
-      - name: Check out repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v2
 
-      # === Activer RDP et créer utilisateur ===
-      - name: Enable RDP & create user
+      - name: 🔧 Enable RDP
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Activating RDP..."
+          Write-Host "[DEBUG] Enabling Remote Desktop..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-          
-          Write-Host "[DEBUG] Creating local user 'runneradmin'..."
-          $securePass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "runneradmin" -Password $securePass
-              Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
-              Write-Host "[SUCCESS] User 'runneradmin' created."
-          } else {
-              Write-Host "[INFO] User 'runneradmin' already exists."
-          }
+          $secPass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $secPass
+          Write-Host "[SUCCESS] RDP enabled"
 
-      # === Installer noVNC & Websockify ===
-      - name: Install noVNC
+      - name: 💻 Install TightVNC Server
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Downloading TightVNC..."
+          $vncUrl = "https://www.tightvnc.com/download/2.8.63/tightvnc-2.8.63-gpl-setup-64bit.msi"
+          $vncInstaller = "$env:TEMP\tightvnc.msi"
+          Invoke-WebRequest -Uri $vncUrl -OutFile $vncInstaller
+          Write-Host "[DEBUG] Installing TightVNC silently..."
+          Start-Process msiexec.exe -ArgumentList "/i `"$vncInstaller`" /qn" -Wait
+          Write-Host "[SUCCESS] TightVNC installed"
+
+      - name: 🖥 Start VNC Server
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Starting TightVNC Server..."
+          Start-Process "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-start" -NoNewWindow
+          Start-Sleep -Seconds 5
+          Write-Host "[SUCCESS] TightVNC server started"
+
+      - name: 🕸 Install noVNC
         shell: pwsh
         run: |
           Write-Host "[DEBUG] Downloading noVNC..."
           $noVNCUrl = "https://github.com/novnc/noVNC/archive/refs/heads/master.zip"
-          $noVNCZip = "$env:TEMP\novnc.zip"
-          Invoke-WebRequest $noVNCUrl -OutFile $noVNCZip
-          Expand-Archive $noVNCZip -DestinationPath "$env:TEMP\novnc"
-          Write-Host "[SUCCESS] noVNC downloaded and extracted."
+          $zipPath = "$env:TEMP\novnc.zip"
+          Invoke-WebRequest -Uri $noVNCUrl -OutFile $zipPath
+          Expand-Archive $zipPath -DestinationPath "$env:TEMP\novnc"
+          Write-Host "[SUCCESS] noVNC ready"
 
-          Write-Host "[DEBUG] Downloading websockify..."
-          $wsUrl = "https://github.com/novnc/websockify/archive/refs/heads/master.zip"
-          $wsZip = "$env:TEMP\websockify.zip"
-          Invoke-WebRequest $wsUrl -OutFile $wsZip
-          Expand-Archive $wsZip -DestinationPath "$env:TEMP\websockify"
-          Write-Host "[SUCCESS] websockify downloaded and extracted."
-
-      # === Lancer le serveur VNC ===
-      - name: Start RDP to VNC bridge
+      - name: 🚀 Start noVNC (Websockify)
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Starting RDP to VNC bridge using TurboVNC or x11vnc for Windows..."
-          # Ici tu peux installer un serveur VNC si nécessaire
-          # Exemple fictif placeholder :
-          Write-Host "[DEBUG] VNC server started on port 5900"
-
-      # === Lancer noVNC ===
-      - name: Start noVNC
-        shell: pwsh
-        run: |
-          Write-Host "[DEBUG] Starting noVNC..."
+          Write-Host "[DEBUG] Starting noVNC websockify on port 6080..."
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install websockify
           Start-Process python -ArgumentList "-m websockify 6080 localhost:5900" -NoNewWindow
-          Write-Host "[SUCCESS] noVNC started on port 6080"
+          Start-Sleep -Seconds 5
+          Write-Host "[SUCCESS] noVNC started"
 
-      # === Installer Cloudflare Tunnel ===
-      - name: Install & Start Cloudflare Tunnel
+      - name: 🌐 Start Cloudflare Tunnel
         shell: pwsh
         run: |
           Write-Host "[DEBUG] Downloading cloudflared..."
           Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:TEMP\cloudflared.exe"
-          Write-Host "[SUCCESS] cloudflared downloaded."
-
-          Write-Host "[DEBUG] Starting Cloudflare Tunnel for noVNC..."
+          Write-Host "[DEBUG] Starting Cloudflare Tunnel to noVNC..."
           Start-Process "$env:TEMP\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -NoNewWindow
-          Write-Host "[SUCCESS] Cloudflare Tunnel started. Waiting for public URL..."
-          Start-Sleep -Seconds 15
-          # Lire le log pour récupérer l'URL publique
-          $logFile = "$env:TEMP\cloudflared.log"
-          Get-Content $logFile -Wait
+          Write-Host "[DEBUG] Waiting 10s for tunnel to establish..."
+          Start-Sleep -Seconds 10
+          Write-Host "[SUCCESS] Cloudflare Tunnel started. Connect via browser when public URL is available."
 
-      # === Garder le runner actif ===
-      - name: Keep runner alive
+      - name: ⏱ Keep Runner Alive
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Keeping workflow alive for 6h..."
+          Write-Host "[DEBUG] Keeping GitHub Runner alive..."
           Start-Sleep -Seconds 21600
