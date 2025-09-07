@@ -53,39 +53,44 @@ jobs:
               exit 1
           }
 
-      - name: 🌐 Start Cloudflare Tunnel & Display Public TCP URL
+      - name: 🌐 Start Cloudflare Tunnel & Display Public TCP URL Live
         shell: pwsh
         run: |
           Write-Host "[DEBUG] Starting Cloudflare Tunnel for RDP..."
-          try {
-              $cloudflared = "$env:USERPROFILE\cloudflared.exe"
+          $cloudflared = "$env:USERPROFILE\cloudflared.exe"
+          $logFile = "$env:TEMP\cloudflared.log"
 
-              # Kill any existing cloudflared processes
-              Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          # Kill existing cloudflared processes
+          Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-              # Start Cloudflared tunnel and capture stdout
-              $logFile = "$env:TEMP\cloudflared_stdout.log"
-              Start-Process -FilePath $cloudflared -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --loglevel debug --stdout" -WindowStyle Hidden -RedirectStandardOutput $logFile -PassThru
+          # Start Cloudflared tunnel with logging
+          Start-Process -FilePath $cloudflared -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --loglevel info --logfile $logFile" -WindowStyle Hidden
 
-              # Wait a few seconds for tunnel to initialize
-              Start-Sleep -Seconds 15
+          # Wait for tunnel initialization and display live URL
+          $timeout = 30
+          $elapsed = 0
+          $publicUrl = $null
 
-              # Extract the public TCP URL
-              $publicUrl = Select-String -Path $logFile -Pattern "tcp://.*trycloudflare.com" | Select-Object -Last 1
-
-              if ($publicUrl) {
-                  Write-Host "[SUCCESS] Cloudflare Tunnel started!"
-                  Write-Host "[INFO] Connect to RDP using: $($publicUrl.Line)"
-              } else {
-                  Write-Host "[FAILED] Could not retrieve public TCP endpoint. Check Cloudflared logs at $logFile"
-                  exit 1
+          while ($elapsed -lt $timeout -and -not $publicUrl) {
+              Start-Sleep -Seconds 2
+              $elapsed += 2
+              if (Test-Path $logFile) {
+                  $publicUrl = Select-String -Path $logFile -Pattern "tcp://.*trycloudflare.com" | Select-Object -Last 1
+                  if ($publicUrl) {
+                      Write-Host "[SUCCESS] Cloudflare Tunnel started!"
+                      Write-Host "[INFO] Connect to RDP using: $($publicUrl.Line)"
+                  } else {
+                      Write-Host "[DEBUG] Waiting for public TCP URL..."
+                  }
               }
-          } catch {
-              Write-Host "[FAILED] Failed to start Cloudflare Tunnel: $_"
+          }
+
+          if (-not $publicUrl) {
+              Write-Host "[FAILED] Could not retrieve public TCP endpoint. Check logs at $logFile"
               exit 1
           }
 
-      - name: ⏱ Keep Runner Alive (6h)
+      - name: ⏱ Keep Runner Alive (6h) with Countdown
         shell: pwsh
         run: |
           Write-Host "[DEBUG] Keeping runner active for 6 hours..."
