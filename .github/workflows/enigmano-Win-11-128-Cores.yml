@@ -1,101 +1,48 @@
-name: "⚡ EnigMano Win11 + 128 Cores Deployment with Chrome Remote Desktop"
+name: Windows Runner + Chrome Remote Desktop
 
 on:
-  workflow_dispatch:
-    inputs:
-      INSTANCE:
-        description: "Instance number to deploy (e.g., 1, 2, 3...)"
-        required: true
-        default: "1"
+  workflow_dispatch: # permet de lancer manuellement le workflow
 
 jobs:
-  deploy-enigmano:
-    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
-    runs-on: windows-11-arm
-
-    env:
-      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
-      SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
-      NGROK_SHAHZAIB: ${{ secrets.NGROK_SHAHZAIB }}
-      REPO: ${{ github.repository }}
-      WORKFLOW_FILE: "enigmano-Win-11-128-Cores.yml"
-      DEPLOYMENT_ID: ${{ github.run_id }}
-
+  setup-windows-runner:
+    runs-on: self-hosted
     steps:
-      - name: 📌 Deployment Parameters
-        shell: pwsh
-        run: |
-          $prevInstance = [int]$env:INSTANCE_ID - 1
-          Write-Host "==============================================="
-          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
-          Write-Host "🔢 Previous Instance     : $prevInstance"
-          Write-Host "📦 GitHub Repository     : $env:REPO"
-          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
-          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
-          Write-Host "==============================================="
 
-      - name: 🔐 Validate Secrets
-        shell: pwsh
-        run: |
-          if (-not $env:SECRET_SHAHZAIB) {
-            Write-Error "❌ Missing GitHub Secret: SECRET_SHAHZAIB"
-            exit 1
-          }
-          if (-not $env:NGROK_SHAHZAIB) {
-            Write-Error "❌ Missing Ngrok Auth Token: NGROK_SHAHZAIB"
-            exit 1
-          }
-          Write-Host "✅ All required secrets validated successfully"
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: 🌐 Install Chrome Remote Desktop Silently
-        shell: pwsh
+      - name: Ensure PowerShell execution policy
         run: |
-          Write-Host "⚡ Downloading Chrome Remote Desktop MSI..."
-          $msiUrl = "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi"
-          $msiPath = "$Env:TEMP\chrome-remote-desktop.msi"
-          Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
-          Write-Host "⚡ Installing Chrome Remote Desktop silently..."
-          Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /quiet /qn /norestart /log $Env:TEMP\crd-install.log" -Wait
-          Write-Host "✅ Installation command executed. Check log at $Env:TEMP\crd-install.log"
+          Set-ExecutionPolicy RemoteSigned -Scope Process -Force
 
-      - name: 🚀 Start Chrome Remote Desktop Host with PIN
-        shell: pwsh
+      - name: Download Chrome Remote Desktop Host
         run: |
-          $crdPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (Test-Path $crdPath) {
-              Write-Host "⚡ Starting Chrome Remote Desktop Host..."
-              & $crdPath `
-                --code="4/0AVMBsJgSBHk7PkAvoZPVxgbRXSYc9gZC_HOstNnJcNkiaLVn5o2OosNBg09IU_41Zuh8Yw" `
-                --redirect-url="https://remotedesktop.google.com/_/oauthredirect" `
-                --name=$Env:COMPUTERNAME `
-                --pin="123456"  # <-- Remplace par ton PIN préféré
-              Write-Host "✅ Host started successfully"
-          } else {
-              Write-Error "❌ Chrome Remote Desktop executable not found. Installation likely failed."
-          }
+          Invoke-WebRequest `
+            -Uri "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi" `
+            -OutFile "$env:TEMP\crd.msi"
 
-      - name: ⚡ Setup NGROK Tunnel
-        shell: pwsh
+      - name: Install Chrome Remote Desktop silently
         run: |
-          Remove-Item -Force .\ngrok.exe, .\ngrok.zip -ErrorAction SilentlyContinue
-          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-          Expand-Archive ngrok.zip -DestinationPath .
-          .\ngrok.exe authtoken $NGROK_SHAHZAIB
-          Write-Host "✅ NGROK initialized"
+          Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\crd.msi", '/qn', '/norestart' -Wait
 
-      - name: ⚔️ Execute EnigMano Instance Script Inline
-        shell: pwsh
+      - name: Configure Chrome Remote Desktop host
+        shell: powershell
         run: |
-          # --- Place ici le contenu complet de ton script EnigMano que tu m'as donné ---
-          # Exemple: log, RDP enable, Brave, Env-Personalization, IDM, Cloudflare-WARP...
-          Write-Host "🚦 EnigMano script execution starting..."
-          # Ton script complet ici
-          Write-Host "✅ EnigMano script completed."
+          $code = "VOTRE_TOKEN_OAUTH"  # Remplacer par le token généré
+          $pin = "123456"              # Remplacer par votre PIN
+          & "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" `
+              --code="$code" `
+              --redirect-url="https://remotedesktop.google.com/_/oauthredirect" `
+              --name=$Env:COMPUTERNAME `
+              --pin="$pin"
 
-      - name: 💠 Final Status
-        if: always()
-        shell: pwsh
+      - name: Verify Chrome Remote Desktop service
+        shell: powershell
         run: |
-          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
-          Write-Host "🔋 Powered by: SHAHZAIB-YT"
-          Write-Host "🏁 Deployment finished with tactical precision."
+          Get-Service "chromoting" | Select-Object Status, StartType
+
+      - name: Start your Windows workflow tasks
+        shell: powershell
+        run: |
+          echo "GitHub Runner is ready and Chrome Remote Desktop is running."
+          # Ici tu peux lancer tes scripts/tests spécifiques Windows
