@@ -18,13 +18,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          function Timestamp { (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") }
-          function Log($msg) { Write-Host "[CRD $(Timestamp)] $msg" }
-          function Fail($msg) { Write-Error "[CRD-ERROR $(Timestamp)] $msg"; Exit 1 }
+          function Log($msg) { Write-Host "[CRD $(Get-Date -Format 'HH:mm:ss')] $msg" }
 
           Log "🔹 Initialisation de l’environnement"
 
-          # Facultatif : activer RDP standard
           try {
             Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
@@ -35,10 +32,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          function Log($msg) { Write-Host "[CRD $(Get-Date -Format "HH:mm:ss")] $msg" }
+          function Log($msg) { Write-Host "[CRD $(Get-Date -Format 'HH:mm:ss')] $msg" }
           
           Log "⏳ Téléchargement CRD..."
-          Invoke-WebRequest "https://dl.google.com/chrome-remote-desktop/current/chromeremotedesktophost.msi" -OutFile "crd.msi"
+          Invoke-WebRequest "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
 
           Log "⏳ Installation CRD..."
           Start-Process msiexec.exe -ArgumentList "/i crd.msi /qn" -Wait
@@ -48,8 +45,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          function Log($msg) { Write-Host "[CRD $(Get-Date -Format "HH:mm:ss")] $msg" }
-          function Fail($msg) { Write-Error "[CRD-ERROR $(Get-Date -Format "HH:mm:ss")] $msg"; Exit 1 }
+          function Log($msg) { Write-Host "[CRD $(Get-Date -Format 'HH:mm:ss')] $msg" }
+          function Fail($msg) { Write-Error "[CRD-ERROR $(Get-Date -Format 'HH:mm:ss')] $msg"; Exit 1 }
 
           $crdExe = "${env:ProgramFiles(x86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           if (-Not (Test-Path $crdExe)) {
@@ -73,6 +70,6 @@ jobs:
         shell: pwsh
         run: |
           for ($i=0; $i -lt 48; $i++) {
-            Write-Host "[CRD $(Get-Date -Format "HH:mm:ss")] 💓 Instance active ($i/48)"
+            Write-Host "[CRD $(Get-Date -Format 'HH:mm:ss')] 💓 Instance active ($i/48)"
             Start-Sleep -Seconds 900
           }
