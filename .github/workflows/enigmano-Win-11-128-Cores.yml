@@ -1,72 +1,51 @@
-name: "⚡ EnigMano Win11 + CRD (Stable Download)"
+name: Deploy EnigMano Win11 + CRD
 
+# Trigger manually or on push
 on:
   workflow_dispatch:
-    inputs:
-      INSTANCE:
-        description: "Instance number"
-        required: true
-        default: "1"
 
 jobs:
-  deploy-enigmano:
-    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
+  deploy-windows:
     runs-on: windows-latest
-
     env:
-      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
-      CRD_CODE: "4/0AVMBsJhftMkCYAJL_JDRkyfO7RODCsAIoltywFOEqBJJB38or1kETQN3XBFsEvGTG4KhqA"
-      CRD_REDIRECT: "https://remotedesktop.google.com/_/oauthredirect"
+      CRD_PIN: 123456  # <-- choose your secure 6-digit PIN here
 
     steps:
-      - name: Parameters Info
-        shell: pwsh
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Install dependencies (PowerShell modules, etc.)
+      - name: Setup PowerShell environment
         run: |
-          Write-Host "================================================"
-          Write-Host " EnigMano Instance     : $env:INSTANCE_ID"
-          Write-Host " Workflow              : $GITHUB_WORKFLOW"
-          Write-Host " Run ID                : $GITHUB_RUN_ID"
-          Write-Host "================================================"
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          Install-Module -Name PSReadLine -Force -SkipPublisherCheck
+          # Add any other setup commands your build needs
 
-      - name: Run Chrome Remote Desktop Host
-        shell: pwsh
+      # Step 3: Download or setup EnigMano Win11 build
+      - name: Setup EnigMano Win11
         run: |
-          $ErrorActionPreference = "Stop"
-          function Log($msg) { Write-Host "[ENIGMANO $(Get-Date -Format 'HH:mm:ss')] $msg" }
-          function Fail($msg) { Write-Error "[ENIGMANO-ERROR $(Get-Date -Format 'HH:mm:ss')] $msg"; Exit 1 }
+          Write-Host "Downloading EnigMano Win11 + CRD..."
+          # Example: adjust your URL/path
+          Invoke-WebRequest -Uri "https://github.com/otakunited/EnigMano-Win11-Sound-128Cores/archive/refs/heads/main.zip" -OutFile "EnigMano.zip"
+          Expand-Archive -Path "EnigMano.zip" -DestinationPath "./EnigMano"
 
-          # Install Chrome Remote Desktop Host
-          try {
-            Log "⬇️ Downloading CRD Host MSI"
-            Invoke-WebRequest `
-              "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
-              -OutFile "crd.msi"
-            Log "✅ MSI downloaded"
+      # Step 4: Start Chrome Remote Desktop host
+      - name: Start Chrome Remote Desktop Host
+        run: |
+          cd ./EnigMano
+          Write-Host "Starting CRD host with automated PIN..."
+          # This line must point to your actual start_host script
+          powershell -Command ".\start_host.ps1 --pin $env:CRD_PIN --headless"
 
-            Log "⏳ Installing CRD Host silently"
-            Start-Process msiexec.exe -ArgumentList "/i crd.msi /qn" -Wait
-            Log "✅ CRD Host installed"
-          } catch {
-            Fail "Installation of Chrome Remote Desktop Host failed: $_"
-          }
+      # Step 5: Confirm host is running
+      - name: Verify CRD host
+        run: |
+          Write-Host "Listing running processes to confirm CRD started:"
+          Get-Process | Where-Object {$_.ProcessName -like "*chrome*"} | Format-Table -AutoSize
 
-          # Launch Chrome Remote Desktop Host using your exact command
-          $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (-not (Test-Path $exe)) {
-            Fail "CRD Host executable not found at $exe"
-          }
-
-          Log "Launching CRD Host..."
-          & "$exe" --code="$env:CRD_CODE" --redirect-url="$env:CRD_REDIRECT" --name=$Env:COMPUTERNAME
-          Log "✅ CRD Host launched. It should appear at https://remotedesktop.google.com/access"
-
-          # Keep the machine alive for a bit so CRD stays active
-          $durationHrs = 6
-          $end = (Get-Date).AddHours($durationHrs)
-          while ((Get-Date) -lt $end) {
-            Log "🕒 Keeping CRD alive..."
-            Start-Sleep -Seconds 600
-          }
-
-          Log "🔴 Fin de session EnigMano instance $env:INSTANCE_ID"
-          Exit
+      # Step 6: Output info
+      - name: Connection Info
+        run: |
+          Write-Host "Your EnigMano Win11 instance should now be running."
+          Write-Host "Use Google Chrome Remote Desktop to connect using PIN: $env:CRD_PIN"
