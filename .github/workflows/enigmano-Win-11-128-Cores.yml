@@ -1,35 +1,63 @@
-name: Jor3a-Ti9niya-RDP-Cloudflared
+name: Jor3a-Ti9niya-RDP-noVNC
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-rdp-tunnel:
+  setup-rdp-novnc:
     runs-on: windows-latest
 
     steps:
     - name: Enable RDP
       run: |
-        # Activer les connexions RDP
+        # Autoriser les connexions RDP
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        # Activer le firewall pour RDP
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        # Créer un utilisateur simple si pas déjà existant
+        # Créer un utilisateur pour RDP si non existant
         $Password = ConvertTo-SecureString "admin@123" -AsPlainText -Force
         if (-Not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "runneradmin" -Password $Password -FullName "RDP User" -Description "Utilisateur pour RDP"
+            New-LocalUser -Name "runneradmin" -Password $Password -FullName "RDP User"
             Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
         }
+
+    - name: Install Python (pour noVNC)
+      run: |
+        choco install python -y
+        refreshenv
+
+    - name: Download TigerVNC server
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/TigerVNC/tigervnc/releases/download/v1.13.0/tigervnc-1.13.0-vc14-x64.exe" -OutFile "$env:USERPROFILE\tigervnc.exe"
+
+    - name: Install TigerVNC silently
+      run: |
+        Start-Process "$env:USERPROFILE\tigervnc.exe" -ArgumentList "/S" -Wait
+
+    - name: Start VNC Server
+      run: |
+        # Crée un fichier de mot de passe temporaire
+        mkdir "$env:USERPROFILE\.vnc" -Force
+        echo "admin" | vncpasswd -f > "$env:USERPROFILE\.vnc\passwd"
+        # Démarre VNC sur le port 5901
+        Start-Process "C:\Program Files\TigerVNC\vncserver.exe" -ArgumentList ":1 -SecurityTypes None" -NoNewWindow
 
     - name: Download cloudflared
       run: |
         Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
 
-    - name: Start cloudflared tunnel for RDP
+    - name: Start cloudflared tunnel for VNC
       run: |
-        # Tunnel TCP vers le port RDP (3389)
-        Start-Process "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:3389" -NoNewWindow
+        Start-Process "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:5901" -NoNewWindow
 
-    - name: Keep GitHub Runner Alive
+    - name: Download noVNC
       run: |
-        Start-Sleep -Seconds 21600  # 6 heures
+        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
+        Expand-Archive -Path "$env:USERPROFILE\novnc.zip" -DestinationPath "$env:USERPROFILE\novnc"
+
+    - name: Start noVNC web client
+      run: |
+        Start-Process "python" -ArgumentList "-m http.server 6080 --directory $env:USERPROFILE\novnc\novnc-master" -NoNewWindow
+
+    - name: Keep Runner Alive
+      run: |
+        Start-Sleep -Seconds 21600
