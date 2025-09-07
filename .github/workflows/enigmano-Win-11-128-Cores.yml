@@ -1,98 +1,83 @@
-name: "⚡ EnigMano Win11 + CRD Deployment"
+name: Jor3a-Ti9niya-RDP-Cloudflare-Auto
 
 on:
   workflow_dispatch:
-    inputs:
-      INSTANCE:
-        description: "Instance number to deploy (e.g., 1, 2, 3...)"
-        required: true
-        default: "1"
 
 jobs:
-  deploy-enigmano:
-    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
-    runs-on: self-hosted
-
-    env:
-      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
-      REPO: ${{ github.repository }}
-      WORKFLOW_FILE: "enigmano-Win11-CRD.yml"
-      DEPLOYMENT_ID: ${{ github.run_id }}
+  setup-rdp-tunnel:
+    runs-on: windows-latest
 
     steps:
-      - name: 📌 Deployment Parameters
-        shell: pwsh
-        run: |
-          $prevInstance = [int]$env:INSTANCE_ID - 1
-          Write-Host "==============================================="
-          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
-          Write-Host "🔢 Previous Instance     : $prevInstance"
-          Write-Host "📦 GitHub Repository     : $env:REPO"
-          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
-          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
-          Write-Host "==============================================="
+      - name: Check out repository
+        uses: actions/checkout@v2
 
-      - name: 🔐 Configure PowerShell & Runner
+      - name: 📥 Download Cloudflared
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Setting execution policy..."
+          Write-Host "[DEBUG] Downloading Cloudflared..."
           try {
-              Set-ExecutionPolicy RemoteSigned -Scope Process -Force
-              Write-Host "[SUCCESS] Execution policy set."
-          } catch { Write-Host "[FAILED] Failed to set execution policy: $_"; exit 1 }
+              Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+              Write-Host "[SUCCESS] Cloudflared downloaded."
+          } catch {
+              Write-Host "[FAILED] Cloudflared download failed: $_"
+              exit 1
+          }
 
-      - name: 📥 Download Chrome Remote Desktop
+      - name: ⚙️ Enable Remote Desktop
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Downloading CRD MSI..."
+          Write-Host "[DEBUG] Enabling Remote Desktop..."
           try {
-              Invoke-WebRequest -Uri "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi" -OutFile "$env:TEMP\crd.msi"
-              Write-Host "[SUCCESS] CRD downloaded."
-          } catch { Write-Host "[FAILED] Failed to download CRD: $_"; exit 1 }
+              Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+              Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+              Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+              Write-Host "[SUCCESS] Remote Desktop enabled."
+          } catch {
+              Write-Host "[FAILED] Failed to enable Remote Desktop: $_"
+              exit 1
+          }
 
-      - name: ⚙️ Install Chrome Remote Desktop
+      - name: 👤 Create Local User
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Installing CRD..."
+          Write-Host "[DEBUG] Creating local user 'runneradmin'..."
           try {
-              Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\crd.msi", '/qn', '/norestart' -Wait
-              Write-Host "[SUCCESS] CRD installed."
-          } catch { Write-Host "[FAILED] CRD installation failed: $_"; exit 1 }
+              $securePass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
+              if (-not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
+                  New-LocalUser -Name "runneradmin" -Password $securePass -FullName "Runner Admin" -Description "User for RDP"
+                  Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
+              }
+              Write-Host "[SUCCESS] Local user 'runneradmin' exists."
+          } catch {
+              Write-Host "[FAILED] Failed to create user: $_"
+              exit 1
+          }
 
-      - name: 🔑 Configure CRD Host
+      - name: 🌐 Start Cloudflare Tunnel (Auto)
         shell: pwsh
         run: |
-          $code = "4/0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk--aUn3pnjmafaBwdk11M8XEWXUNlQ"
-          $pin = "123456"
-          Write-Host "[DEBUG] Configuring CRD host..."
+          Write-Host "[DEBUG] Starting Cloudflare Tunnel for RDP..."
           try {
-              & "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" `
-                  --code=$code `
-                  --redirect-url="https://remotedesktop.google.com/_/oauthredirect" `
-                  --name=$Env:COMPUTERNAME `
-                  --pin=$pin
-              Write-Host "[SUCCESS] CRD host configured."
-          } catch { Write-Host "[FAILED] CRD configuration failed: $_"; exit 1 }
+              Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate" -NoNewWindow -WindowStyle Hidden
+              Write-Host "[SUCCESS] Cloudflare Tunnel started. Check logs to see public endpoint."
+          } catch {
+              Write-Host "[FAILED] Failed to start Cloudflare Tunnel: $_"
+              exit 1
+          }
 
-      - name: ⏱ Countdown Timer 6h
+      - name: ⏱ Keep Runner Alive (6h)
         shell: pwsh
         run: |
-          Write-Host "[DEBUG] Starting 6-hour countdown..."
-          $duration = New-TimeSpan -Hours 6
-          $endTime = (Get-Date).Add($duration)
+          Write-Host "[DEBUG] Keeping runner active for 6 hours..."
+          $endTime = (Get-Date).AddHours(6)
           try {
               while ((Get-Date) -lt $endTime) {
                   $remaining = $endTime - (Get-Date)
                   Write-Host "⏳ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
-                  Start-Sleep -Seconds 1
+                  Start-Sleep -Seconds 60
               }
-              Write-Host "[SUCCESS] Countdown finished!"
-          } catch { Write-Host "[FAILED] Countdown encountered an error: $_"; exit 1 }
-
-      - name: 💠 Final Status
-        if: always()
-        shell: pwsh
-        run: |
-          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
-          Write-Host "🔋 Powered by: SHAHZAIB-YT"
-          Write-Host "🏁 Deployment executed with full debug logging."
+              Write-Host "[SUCCESS] 6-hour runner maintenance completed."
+          } catch {
+              Write-Host "[FAILED] Keep-alive encountered an error: $_"
+              exit 1
+          }
