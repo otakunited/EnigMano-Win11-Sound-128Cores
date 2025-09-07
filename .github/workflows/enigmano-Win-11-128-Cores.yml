@@ -1,4 +1,4 @@
-name: "⚡ EnigMano Win11 + CRD"
+name: "⚡ EnigMano Win11 + CRD (Stable Download)"
 
 on:
   workflow_dispatch:
@@ -19,62 +19,54 @@ jobs:
       CRD_REDIRECT: "https://remotedesktop.google.com/_/oauthredirect"
 
     steps:
-      - name: 📌 Parameters
+      - name: Parameters Info
         shell: pwsh
         run: |
-          Write-Host "==============================================="
-          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
-          Write-Host "📦 GitHub Workflow       : $GITHUB_WORKFLOW"
-          Write-Host "🆔 Deployment ID         : $GITHUB_RUN_ID"
-          Write-Host "==============================================="
+          Write-Host "================================================"
+          Write-Host " EnigMano Instance     : $env:INSTANCE_ID"
+          Write-Host " Workflow              : $GITHUB_WORKFLOW"
+          Write-Host " Run ID                : $GITHUB_RUN_ID"
+          Write-Host "================================================"
 
-      - name: ⚔️ Setup Windows + CRD
+      - name: Run Chrome Remote Desktop Host
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          function Log($msg) { Write-Host "[ENIGMANO $(Get-Date -Format 'HH:mm:ss')] $msg" }
+          function Fail($msg) { Write-Error "[ENIGMANO-ERROR $(Get-Date -Format 'HH:mm:ss')] $msg"; Exit 1 }
 
-          function Timestamp { (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") }
-          function Log($msg) { Write-Host "[ENIGMANO $(Timestamp)] $msg" }
-          function Fail($msg) { Write-Error "[ENIGMANO-ERROR $(Timestamp)] $msg"; Exit 1 }
-
-          # === Activer RDP (optionnel) ===
+          # Install Chrome Remote Desktop Host
           try {
-            Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            $secPass = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
-            Set-LocalUser -Name "runneradmin" -Password $secPass
-            Log "✅ RDP activé (user=runneradmin / pass=P@ssw0rd!)"
-          } catch { Fail "Activation RDP échouée : $_" }
+            Log "⬇️ Downloading CRD Host MSI"
+            Invoke-WebRequest `
+              "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
+              -OutFile "crd.msi"
+            Log "✅ MSI downloaded"
 
-          # === Installer Chrome Remote Desktop ===
-          try {
-            Log "⬇️ Téléchargement Chrome Remote Desktop..."
-            Invoke-WebRequest "https://dl.google.com/release2/misc/mxkqkfxhknnh3ijj6lkjru7aoi_123.0.0.0/chrome-remote-desktop_current_amd64.msi" -OutFile "crd.msi"
+            Log "⏳ Installing CRD Host silently"
             Start-Process msiexec.exe -ArgumentList "/i crd.msi /qn" -Wait
-            Log "✅ CRD installé"
-          } catch { Fail "Installation CRD échouée : $_" }
-
-          # === Lancer Chrome Remote Desktop ===
-          try {
-            $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-            if (-not (Test-Path $exe)) { Fail "❌ Fichier introuvable : $exe" }
-
-            & "$exe" --code="$env:CRD_CODE" --redirect-url="$env:CRD_REDIRECT" --name=$Env:COMPUTERNAME
-            Log "🌐 Chrome Remote Desktop lancé (disponible dans https://remotedesktop.google.com/access)"
-          } catch { Fail "Impossible de lancer CRD : $_" }
-
-          # === Timer auto shutdown ===
-          $totalMinutes = 340
-          $startTime = Get-Date
-          $endTime = $startTime.AddMinutes($totalMinutes)
-
-          while ((Get-Date) -lt $endTime) {
-            $now = Get-Date
-            $elapsed = [math]::Round(($now - $startTime).TotalMinutes, 1)
-            $remaining = [math]::Round(($endTime - $now).TotalMinutes, 1)
-            Log "⏳ Uptime: $elapsed min | Restant: $remaining min"
-            Start-Sleep -Seconds 900
+            Log "✅ CRD Host installed"
+          } catch {
+            Fail "Installation of Chrome Remote Desktop Host failed: $_"
           }
 
-          Log "🔴 Arrêt instance EnigMano $env:INSTANCE_ID"
+          # Launch Chrome Remote Desktop Host using your exact command
+          $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (-not (Test-Path $exe)) {
+            Fail "CRD Host executable not found at $exe"
+          }
+
+          Log "Launching CRD Host..."
+          & "$exe" --code="$env:CRD_CODE" --redirect-url="$env:CRD_REDIRECT" --name=$Env:COMPUTERNAME
+          Log "✅ CRD Host launched. It should appear at https://remotedesktop.google.com/access"
+
+          # Keep the machine alive for a bit so CRD stays active
+          $durationHrs = 6
+          $end = (Get-Date).AddHours($durationHrs)
+          while ((Get-Date) -lt $end) {
+            Log "🕒 Keeping CRD alive..."
+            Start-Sleep -Seconds 600
+          }
+
+          Log "🔴 Fin de session EnigMano instance $env:INSTANCE_ID"
           Exit
