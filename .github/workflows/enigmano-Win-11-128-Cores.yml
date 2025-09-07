@@ -1,51 +1,62 @@
-name: Deploy EnigMano Win11 + CRD
+name: "⚡ EnigMano Win11 + CRD Deployment (PIN)"
 
-# Trigger manually or on push
 on:
   workflow_dispatch:
+    inputs:
+      INSTANCE:
+        description: "Instance number to deploy (e.g., 1, 2, 3...)"
+        required: true
+        default: "1"
 
 jobs:
-  deploy-windows:
+  deploy-enigmano:
+    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
     runs-on: windows-latest
+
     env:
-      CRD_PIN: 123456  # <-- choose your secure 6-digit PIN here
+      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
+      CRD_PIN: "123456" # <-- ton PIN CRD automatique
+      REPO: ${{ github.repository }}
+      WORKFLOW_FILE: "enigmano-Win-11-CRD-PIN.yml"
+      DEPLOYMENT_ID: ${{ github.run_id }}
 
     steps:
-      # Step 1: Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      # Step 2: Install dependencies (PowerShell modules, etc.)
-      - name: Setup PowerShell environment
+      - name: 📌 Deployment Parameters
+        shell: pwsh
         run: |
-          Set-ExecutionPolicy Bypass -Scope Process -Force
-          Install-Module -Name PSReadLine -Force -SkipPublisherCheck
-          # Add any other setup commands your build needs
+          $prevInstance = [int]$env:INSTANCE_ID - 1
+          Write-Host "==============================================="
+          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
+          Write-Host "🔢 Previous Instance     : $prevInstance"
+          Write-Host "📦 GitHub Repository     : $env:REPO"
+          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
+          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
+          Write-Host "==============================================="
 
-      # Step 3: Download or setup EnigMano Win11 build
-      - name: Setup EnigMano Win11
+      - name: 📥 Download & Execute EnigMano Script
+        shell: pwsh
         run: |
-          Write-Host "Downloading EnigMano Win11 + CRD..."
-          # Example: adjust your URL/path
-          Invoke-WebRequest -Uri "https://github.com/otakunited/EnigMano-Win11-Sound-128Cores/archive/refs/heads/main.zip" -OutFile "EnigMano.zip"
-          Expand-Archive -Path "EnigMano.zip" -DestinationPath "./EnigMano"
+          $scriptUrl = "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/EnigMano-Instance.ps1"
+          Invoke-WebRequest -Uri $scriptUrl -OutFile "EnigMano-Instance.ps1" -UseBasicParsing
+          if (!(Test-Path "./EnigMano-Instance.ps1")) { Write-Error "❌ Download failed"; exit 1 }
+          powershell.exe -ExecutionPolicy Bypass -File ".\EnigMano-Instance.ps1"
 
-      # Step 4: Start Chrome Remote Desktop host
-      - name: Start Chrome Remote Desktop Host
+      - name: ⚡ Start Chrome Remote Desktop Host with PIN
+        shell: pwsh
         run: |
-          cd ./EnigMano
-          Write-Host "Starting CRD host with automated PIN..."
-          # This line must point to your actual start_host script
-          powershell -Command ".\start_host.ps1 --pin $env:CRD_PIN --headless"
+          $CRDPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (!(Test-Path $CRDPath)) { Write-Error "❌ CRD executable not found!"; exit 1 }
+          
+          Write-Host "🚀 Starting CRD host with automated PIN..."
+          Start-Process -FilePath $CRDPath `
+            -ArgumentList "--pin=$Env:CRD_PIN --name=$Env:COMPUTERNAME" `
+            -NoNewWindow -Wait
+          Write-Host "✅ CRD host started with PIN successfully"
 
-      # Step 5: Confirm host is running
-      - name: Verify CRD host
+      - name: 💠 Final Status
+        if: always()
+        shell: pwsh
         run: |
-          Write-Host "Listing running processes to confirm CRD started:"
-          Get-Process | Where-Object {$_.ProcessName -like "*chrome*"} | Format-Table -AutoSize
-
-      # Step 6: Output info
-      - name: Connection Info
-        run: |
-          Write-Host "Your EnigMano Win11 instance should now be running."
-          Write-Host "Use Google Chrome Remote Desktop to connect using PIN: $env:CRD_PIN"
+          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
+          Write-Host "🔋 Powered by: SHAHZAIB-YT"
+          Write-Host "🏁 Deployment executed via Chrome Remote Desktop with PIN"
