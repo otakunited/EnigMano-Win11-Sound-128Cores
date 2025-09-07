@@ -1,4 +1,4 @@
-name: "⚡ EnigMano Win11 + CRD Deployment (PIN)"
+name: "⚡ EnigMano Win11 + 128 Cores Deployment"
 
 on:
   workflow_dispatch:
@@ -11,14 +11,14 @@ on:
 jobs:
   deploy-enigmano:
     name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
-    runs-on: windows-latest
+    runs-on: windows-11-arm
 
     env:
       INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
-      CRD_PIN: "123456" # <-- ton PIN CRD automatique
       REPO: ${{ github.repository }}
-      WORKFLOW_FILE: "enigmano-Win-11-CRD-PIN.yml"
+      WORKFLOW_FILE: "enigmano-Win-11-128-Cores.yml"
       DEPLOYMENT_ID: ${{ github.run_id }}
+      CRD_PIN: "123456" # <-- Définis ton PIN ici
 
     steps:
       - name: 📌 Deployment Parameters
@@ -33,25 +33,43 @@ jobs:
           Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
           Write-Host "==============================================="
 
-      - name: 📥 Download & Execute EnigMano Script
+      - name: ⚡ Start Chrome Remote Desktop with PIN
         shell: pwsh
         run: |
-          $scriptUrl = "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/EnigMano-Instance.ps1"
-          Invoke-WebRequest -Uri $scriptUrl -OutFile "EnigMano-Instance.ps1" -UseBasicParsing
-          if (!(Test-Path "./EnigMano-Instance.ps1")) { Write-Error "❌ Download failed"; exit 1 }
-          powershell.exe -ExecutionPolicy Bypass -File ".\EnigMano-Instance.ps1"
+          $ErrorActionPreference = "Stop"
 
-      - name: ⚡ Start Chrome Remote Desktop Host with PIN
-        shell: pwsh
-        run: |
-          $CRDPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          if (!(Test-Path $CRDPath)) { Write-Error "❌ CRD executable not found!"; exit 1 }
-          
-          Write-Host "🚀 Starting CRD host with automated PIN..."
-          Start-Process -FilePath $CRDPath `
-            -ArgumentList "--pin=$Env:CRD_PIN --name=$Env:COMPUTERNAME" `
-            -NoNewWindow -Wait
-          Write-Host "✅ CRD host started with PIN successfully"
+          function Timestamp { (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") }
+          function Log($msg) { Write-Host "[ENIGMANO $(Timestamp)] $msg" }
+          function Fail($msg) { Write-Error "[ENIGMANO-ERROR $(Timestamp)] $msg"; Exit 1 }
+
+          $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+          Write-Host @"
+----------------------------------------------------
+         ENIGMANO INSTANCE $env:INSTANCE_ID BOOTING
+----------------------------------------------------
+  STATUS    : Initializing CRD host
+  TIME      : $now
+  ARCHITECT : SHAHZAIB-YT
+----------------------------------------------------
+"@
+
+          # Vérifie que Chrome Remote Desktop est installé
+          $CRDExe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (!(Test-Path $CRDExe)) { Fail "❌ Chrome Remote Desktop not found at $CRDExe" }
+
+          # Variables
+          $HostName = $Env:COMPUTERNAME
+          $CRDCode  = "4/0AVMBsJhftMkCYAJL_JDRkyfO7RODCsAIoltywFOEqBJJB38or1kETQN3XBFsEvGTG4KhqA"
+          $PIN      = $Env:CRD_PIN
+
+          # Active le Remote Desktop local si nécessaire
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          # Lancement du host Chrome Remote Desktop avec code et PIN
+          Log "🚀 Starting Chrome Remote Desktop host..."
+          Start-Process -FilePath $CRDExe -ArgumentList "--code=$CRDCode --redirect-url=https://remotedesktop.google.com/_/oauthredirect --name=$HostName --pin=$PIN" -NoNewWindow -Wait
+          Log "✅ CRD host started with PIN $PIN. Remote access ready!"
 
       - name: 💠 Final Status
         if: always()
@@ -59,4 +77,4 @@ jobs:
         run: |
           Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
           Write-Host "🔋 Powered by: SHAHZAIB-YT"
-          Write-Host "🏁 Deployment executed via Chrome Remote Desktop with PIN"
+          Write-Host "🏁 EnigMano deployment executed with tactical precision."
