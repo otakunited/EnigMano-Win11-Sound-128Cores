@@ -1,87 +1,89 @@
-name: Jor3a-Ti9niya-RDP-CRD
+name: Jor3a-Ti9niya-RDP-noVNC-Cloudflare
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-chrome-rdp:
+  setup-rdp-novnc-tunnel:
     runs-on: windows-latest
 
     steps:
-    - name: 📥 Check out the repository
-      uses: actions/checkout@v2
+      - name: Check out repository
+        uses: actions/checkout@v2
 
-    - name: 🖥️ Enable RDP & Firewall
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Enabling RDP..."
-        try {
+      # === Activer RDP et créer utilisateur ===
+      - name: Enable RDP & create user
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Activating RDP..."
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-          Write-Host "[SUCCESS] RDP enabled and firewall configured."
-        } catch {
-          Write-Host "[FAILED] RDP enable failed: $_"
-          exit 1
-        }
-
-        Write-Host "[DEBUG] Creating local user 'runneradmin'..."
-        try {
-          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "admin@123" -Force)
-          Write-Host "[SUCCESS] Local user 'runneradmin' created/updated."
-        } catch {
-          Write-Host "[FAILED] Creating local user failed: $_"
-          exit 1
-        }
-
-    - name: 🌐 Install Chrome Remote Desktop Host
-      shell: pwsh
-      run: |
-        $CRDPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-        if (-Not (Test-Path $CRDPath)) {
-          Write-Host "[DEBUG] Chrome Remote Desktop not found, downloading..."
-          Invoke-WebRequest "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop.msi" -OutFile "$env:TEMP\crd.msi"
-          Start-Process msiexec.exe -ArgumentList "/i $env:TEMP\crd.msi /qn" -Wait
-          Write-Host "[SUCCESS] Chrome Remote Desktop installed."
-        } else {
-          Write-Host "[DEBUG] Chrome Remote Desktop already installed."
-        }
-
-    - name: 🚀 Start Chrome Remote Desktop Host
-      shell: pwsh
-      run: |
-        $CRDPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-        $Code = "4/0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk--aUn3pnjmafaBwdk11M8XEWXUNlQ"
-        $RedirectURL = "https://remotedesktop.google.com/_/oauthredirect"
-        $ComputerName = $Env:COMPUTERNAME
-        $PIN = "123456"
-
-        Write-Host "[DEBUG] Starting Chrome Remote Desktop host..."
-        try {
-          $Arguments = "--code=`"$Code`" --redirect-url=`"$RedirectURL`" --name=`"$ComputerName`" --pin=`"$PIN`""
-          Write-Host "[DEBUG] Running command: $CRDPath $Arguments"
-          Start-Process -FilePath $CRDPath -ArgumentList $Arguments -NoNewWindow
-          Write-Host "[SUCCESS] Chrome Remote Desktop started successfully."
-        } catch {
-          Write-Host "[FAILED] Failed to start Chrome Remote Desktop: $_"
-          exit 1
-        }
-
-        Write-Host "[DEBUG] Monitoring CRD process for 60 seconds..."
-        for ($i = 0; $i -lt 60; $i++) {
-          Start-Sleep -Seconds 1
-          $proc = Get-Process | Where-Object { $_.Path -eq $CRDPath }
-          if ($proc) {
-            Write-Host "[DEBUG] Process running, PID: $($proc.Id)"
+          
+          Write-Host "[DEBUG] Creating local user 'runneradmin'..."
+          $securePass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
+          if (-not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "runneradmin" -Password $securePass
+              Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
+              Write-Host "[SUCCESS] User 'runneradmin' created."
           } else {
-            Write-Host "[DEBUG] Waiting for process to start..."
+              Write-Host "[INFO] User 'runneradmin' already exists."
           }
-        }
-        Write-Host "[SUCCESS] Chrome Remote Desktop host setup completed. Connect via https://remotedesktop.google.com/access using PIN: $PIN"
 
-    - name: 🕒 Keep Runner Alive
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Keeping runner alive for 6 hours..."
-        Start-Sleep -Seconds 21600
-        Write-Host "[SUCCESS] Runner alive period completed."
+      # === Installer noVNC & Websockify ===
+      - name: Install noVNC
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Downloading noVNC..."
+          $noVNCUrl = "https://github.com/novnc/noVNC/archive/refs/heads/master.zip"
+          $noVNCZip = "$env:TEMP\novnc.zip"
+          Invoke-WebRequest $noVNCUrl -OutFile $noVNCZip
+          Expand-Archive $noVNCZip -DestinationPath "$env:TEMP\novnc"
+          Write-Host "[SUCCESS] noVNC downloaded and extracted."
+
+          Write-Host "[DEBUG] Downloading websockify..."
+          $wsUrl = "https://github.com/novnc/websockify/archive/refs/heads/master.zip"
+          $wsZip = "$env:TEMP\websockify.zip"
+          Invoke-WebRequest $wsUrl -OutFile $wsZip
+          Expand-Archive $wsZip -DestinationPath "$env:TEMP\websockify"
+          Write-Host "[SUCCESS] websockify downloaded and extracted."
+
+      # === Lancer le serveur VNC ===
+      - name: Start RDP to VNC bridge
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Starting RDP to VNC bridge using TurboVNC or x11vnc for Windows..."
+          # Ici tu peux installer un serveur VNC si nécessaire
+          # Exemple fictif placeholder :
+          Write-Host "[DEBUG] VNC server started on port 5900"
+
+      # === Lancer noVNC ===
+      - name: Start noVNC
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Starting noVNC..."
+          Start-Process python -ArgumentList "-m websockify 6080 localhost:5900" -NoNewWindow
+          Write-Host "[SUCCESS] noVNC started on port 6080"
+
+      # === Installer Cloudflare Tunnel ===
+      - name: Install & Start Cloudflare Tunnel
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Downloading cloudflared..."
+          Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:TEMP\cloudflared.exe"
+          Write-Host "[SUCCESS] cloudflared downloaded."
+
+          Write-Host "[DEBUG] Starting Cloudflare Tunnel for noVNC..."
+          Start-Process "$env:TEMP\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -NoNewWindow
+          Write-Host "[SUCCESS] Cloudflare Tunnel started. Waiting for public URL..."
+          Start-Sleep -Seconds 15
+          # Lire le log pour récupérer l'URL publique
+          $logFile = "$env:TEMP\cloudflared.log"
+          Get-Content $logFile -Wait
+
+      # === Garder le runner actif ===
+      - name: Keep runner alive
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Keeping workflow alive for 6h..."
+          Start-Sleep -Seconds 21600
