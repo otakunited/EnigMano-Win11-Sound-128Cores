@@ -4,78 +4,84 @@ on:
   workflow_dispatch:
 
 jobs:
-  setup-rdp-novnc-tunnel:
+  setup-rdp-novnc:
     runs-on: windows-latest
 
+    env:
+      VNC_PASSWORD: "123456"
+
     steps:
-    - name: Check out the repository
+    - name: Check out repository
       uses: actions/checkout@v2
+
+    - name: Enable RDP
+      run: |
+        Write-Host "[DEBUG] Enabling Windows Remote Desktop..."
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Write-Host "[SUCCESS] RDP enabled."
+
+    - name: Install TightVNC Server
+      run: |
+        Write-Host "[DEBUG] Downloading TightVNC..."
+        Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.63/tightvnc-2.8.63-gpl-setup-64bit.msi" -OutFile "$env:USERPROFILE\tightvnc.msi"
+        Write-Host "[DEBUG] Installing TightVNC silently..."
+        Start-Process msiexec.exe -ArgumentList '/i',"$env:USERPROFILE\tightvnc.msi",'/qn','/norestart' -Wait
+        Write-Host "[SUCCESS] TightVNC installed."
+
+    - name: Configure TightVNC password
+      run: |
+        Write-Host "[DEBUG] Setting VNC password..."
+        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -setpasswd $env:VNC_PASSWORD
+        Write-Host "[SUCCESS] VNC password configured."
+
+    - name: Start TightVNC Server
+      run: |
+        Write-Host "[DEBUG] Starting TightVNC server..."
+        Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-start" -NoNewWindow
+        Start-Sleep -Seconds 5
+        Write-Host "[SUCCESS] TightVNC server started."
 
     - name: Install Python (for websockify/noVNC)
       uses: actions/setup-python@v4
       with:
-        python-version: "3.x"
+        python-version: "3.11"
 
-    - name: Enable RDP & Firewall
+    - name: Install websockify
       run: |
-        Write-Host "[DEBUG] Enabling RDP and Firewall rules..."
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-        $pass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
-        Set-LocalUser -Name "runneradmin" -Password $pass
-        New-NetFirewallRule -DisplayName "Allow noVNC 6080" -Direction Inbound -LocalPort 6080 -Protocol TCP -Action Allow
-        Write-Host "[DEBUG] RDP and firewall configured successfully."
+        Write-Host "[DEBUG] Installing websockify..."
+        pip install --upgrade pip
+        pip install websockify
+        Write-Host "[SUCCESS] websockify installed."
 
-    - name: Download and Setup noVNC
+    - name: Download noVNC
       run: |
         Write-Host "[DEBUG] Downloading noVNC..."
-        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:TEMP\novnc.zip"
-        Expand-Archive -Path "$env:TEMP\novnc.zip" -DestinationPath "$env:TEMP\novnc" -Force
-        Write-Host "[DEBUG] noVNC extracted."
+        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
+        Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath "$env:USERPROFILE\novnc"
+        Write-Host "[SUCCESS] noVNC downloaded."
 
-    - name: Start noVNC server
-      shell: pwsh
+    - name: Start noVNC
       run: |
-        Write-Host "[DEBUG] Starting noVNC..."
-        $novncPath = "$env:TEMP\novnc\novnc-master"
-        python -m websockify 6080 --target-config=127.0.0.1:3389 --web $novncPath > "$env:TEMP\novnc.log" 2>&1 &
+        Write-Host "[DEBUG] Starting noVNC (websockify)..."
+        Start-Process -FilePath "python" -ArgumentList "-m websockify 6080 localhost:5900 --web $env:USERPROFILE\novnc\novnc-master" -NoNewWindow
         Start-Sleep -Seconds 5
-        Write-Host "[DEBUG] noVNC should be running on port 6080."
+        Write-Host "[SUCCESS] noVNC started on port 6080."
 
-    - name: Download Cloudflared
+    - name: Install Cloudflared
       run: |
-        Write-Host "[DEBUG] Downloading Cloudflared..."
-        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:TEMP\cloudflared.exe"
-        Write-Host "[DEBUG] Cloudflared downloaded."
+        Write-Host "[DEBUG] Downloading cloudflared..."
+        Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+        Write-Host "[SUCCESS] cloudflared downloaded."
 
-    - name: Wait for noVNC to be ready
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Waiting for noVNC to respond on port 6080..."
-        $timeout = 30
-        $portReady = $false
-        for ($i=0; $i -lt $timeout; $i++) {
-            $tcp = Test-NetConnection -ComputerName 127.0.0.1 -Port 6080
-            if ($tcp.TcpTestSucceeded) {
-                $portReady = $true
-                break
-            }
-            Start-Sleep -Seconds 1
-        }
-        if (-not $portReady) { throw "[FAILED] noVNC not responding on port 6080" }
-        Write-Host "[SUCCESS] noVNC is ready."
-
-    - name: Start Cloudflare Tunnel for noVNC
-      shell: pwsh
+    - name: Start Cloudflare Tunnel
       run: |
         Write-Host "[DEBUG] Starting Cloudflare Tunnel for noVNC..."
-        Start-Process "$env:TEMP\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -NoNewWindow
-        Write-Host "[DEBUG] Cloudflare Tunnel launched. Check logs for public URL."
+        Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -NoNewWindow
         Start-Sleep -Seconds 10
-        Get-Content "$env:TEMP\cloudflared.log" -Wait
+        Write-Host "[SUCCESS] Cloudflare Tunnel started. Check logs for public URL."
 
-    - name: Keep Runner Alive
+    - name: Keep Workflow Alive
       run: |
-        Write-Host "[DEBUG] Keeping GitHub Action alive for 6 hours..."
+        Write-Host "[DEBUG] Keeping workflow alive for 6 hours..."
         Start-Sleep -Seconds 21600
