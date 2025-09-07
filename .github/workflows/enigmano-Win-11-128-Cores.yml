@@ -1,4 +1,4 @@
-name: Jor3a-Ti9niya-RDP-Cloudflare-Auto
+name: Jor3a-Ti9niya-RDP-Cloudflare-AutoLink
 
 on:
   workflow_dispatch:
@@ -53,13 +53,28 @@ jobs:
               exit 1
           }
 
-      - name: 🌐 Start Cloudflare Tunnel (Auto)
+      - name: 🌐 Start Cloudflare Tunnel & Show Public TCP URL
         shell: pwsh
         run: |
           Write-Host "[DEBUG] Starting Cloudflare Tunnel for RDP..."
           try {
-              Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate" -NoNewWindow -WindowStyle Hidden
-              Write-Host "[SUCCESS] Cloudflare Tunnel started. Check logs to see public endpoint."
+              $cloudflared = "$env:USERPROFILE\cloudflared.exe"
+
+              # Kill any existing cloudflared instances
+              Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+              # Start the tunnel in a hidden window
+              Start-Process -FilePath $cloudflared -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --loglevel info" -WindowStyle Hidden
+
+              Start-Sleep -Seconds 10 # Give cloudflared time to start
+
+              # Get the public TCP URL from logs
+              $logFile = "$env:TEMP\cloudflared.log"
+              Start-Process -FilePath $cloudflared -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --logfile $logFile --loglevel info" -WindowStyle Hidden
+
+              Start-Sleep -Seconds 5
+              $publicUrl = Select-String -Path $logFile -Pattern "URL" | Select-Object -Last 1
+              Write-Host "[SUCCESS] Cloudflare Tunnel started. Public TCP endpoint: $publicUrl"
           } catch {
               Write-Host "[FAILED] Failed to start Cloudflare Tunnel: $_"
               exit 1
