@@ -1,84 +1,83 @@
-name: Jor3a-Ti9niya-RDP-Cloudflare-TCP
+name: RDP via noVNC + Cloudflare TCP
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-rdp-tunnel:
+  rdp-novnc-tunnel:
     runs-on: [self-hosted, windows]
 
     steps:
-    - name: 📌 Checkout Repository
-      uses: actions/checkout@v2
+      - name: 📌 Checkout Repository
+        uses: actions/checkout@v2
 
-    - name: ⚙️ Enable Remote Desktop
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Enabling RDP..."
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-        Write-Host "[SUCCESS] RDP enabled"
+      - name: ⚙️ Enable Remote Desktop
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+          Write-Host "[SUCCESS] RDP enabled"
 
-    - name: 👤 Create RDP User
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Creating local user 'runneradmin'..."
-        $pass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
-        if (-not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "runneradmin" -Password $pass -FullName "RDP Admin"
-            Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
-        }
-        Write-Host "[SUCCESS] Local user ready"
+      - name: 👤 Create RDP User
+        shell: pwsh
+        run: |
+          $pass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
+          if (-not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "runneradmin" -Password $pass -FullName "RDP Admin"
+              Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
+          }
+          Write-Host "[SUCCESS] User runneradmin created"
 
-    - name: 🌐 Download Cloudflared
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Downloading Cloudflared..."
-        $cfPath = "$env:USERPROFILE\cloudflared.exe"
-        Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfPath
-        Write-Host "[SUCCESS] Cloudflared downloaded"
+      - name: 🌐 Download Cloudflared
+        shell: pwsh
+        run: |
+          $cfPath = "$env:USERPROFILE\cloudflared.exe"
+          Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfPath
+          Write-Host "[SUCCESS] Cloudflared downloaded"
 
-    - name: 🚀 Start Cloudflare TCP Tunnel
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Starting Cloudflare TCP Tunnel..."
-        $cfExe = "$env:USERPROFILE\cloudflared.exe"
-        $logFile = "$env:TEMP\cloudflared.log"
+      - name: 🚀 Start Cloudflare TCP Tunnel
+        shell: pwsh
+        run: |
+          $cfExe = "$env:USERPROFILE\cloudflared.exe"
+          $logFile = "$env:TEMP\cloudflared.log"
+          Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Process -FilePath $cfExe -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --loglevel info --logfile $logFile" -WindowStyle Hidden
+          $timeout = 60; $elapsed = 0; $publicUrl = $null
+          while ($elapsed -lt $timeout -and -not $publicUrl) {
+              Start-Sleep -Seconds 2
+              $elapsed += 2
+              if (Test-Path $logFile) {
+                  $publicUrl = Select-String -Path $logFile -Pattern "tcp://.*trycloudflare.com" | Select-Object -Last 1
+                  if ($publicUrl) { Write-Host "[SUCCESS] Cloudflare Tunnel URL: $($publicUrl.Line)" }
+                  else { Write-Host "[DEBUG] Waiting for public TCP URL..." }
+              }
+          }
+          if (-not $publicUrl) { Write-Host "[FAILED] Could not retrieve TCP endpoint"; exit 1 }
 
-        # Kill existing cloudflared processes
-        Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+      - name: 🖥 Download noVNC + Websockify
+        shell: pwsh
+        run: |
+          $novncDir = "$env:USERPROFILE\novnc"
+          Invoke-WebRequest "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
+          Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath $novncDir
+          Write-Host "[SUCCESS] noVNC downloaded"
 
-        # Start Cloudflared tunnel
-        Start-Process -FilePath $cfExe -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --loglevel info --logfile $logFile" -WindowStyle Hidden
+      - name: 🔗 Start Websockify for RDP-to-Web
+        shell: pwsh
+        run: |
+          Write-Host "[DEBUG] Starting Websockify for noVNC..."
+          $websockify = "$env:USERPROFILE\novnc\noVNC-master\utils\websockify\run.cmd"
+          # Expose RDP port via WebSocket on port 6080
+          Start-Process -FilePath "cmd.exe" -ArgumentList "/c $websockify 6080 localhost:3389" -WindowStyle Hidden
+          Write-Host "[SUCCESS] noVNC WebSocket server running at http://localhost:6080"
 
-        # Wait for public TCP URL
-        $timeout = 60
-        $elapsed = 0
-        $publicUrl = $null
-        while ($elapsed -lt $timeout -and -not $publicUrl) {
-            Start-Sleep -Seconds 2
-            $elapsed += 2
-            if (Test-Path $logFile) {
-                $publicUrl = Select-String -Path $logFile -Pattern "tcp://.*trycloudflare.com" | Select-Object -Last 1
-                if ($publicUrl) { Write-Host "[SUCCESS] Cloudflare Tunnel URL: $($publicUrl.Line)" }
-                else { Write-Host "[DEBUG] Waiting for public TCP URL..." }
-            }
-        }
-
-        if (-not $publicUrl) {
-            Write-Host "[FAILED] Could not retrieve public TCP endpoint. Check log at $logFile"
-            exit 1
-        }
-
-    - name: ⏱ Keep Runner Alive for 6h
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Keeping runner active for 6 hours..."
-        $endTime = (Get-Date).AddHours(6)
-        while ((Get-Date) -lt $endTime) {
-            $remaining = $endTime - (Get-Date)
-            Write-Host "⏳ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
-            Start-Sleep -Seconds 60
-        }
-        Write-Host "[SUCCESS] 6-hour keep-alive completed."
+      - name: ⏱ Keep Runner Alive for 6h
+        shell: pwsh
+        run: |
+          $endTime = (Get-Date).AddHours(6)
+          while ((Get-Date) -lt $endTime) {
+              $remaining = $endTime - (Get-Date)
+              Write-Host "⏳ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
+              Start-Sleep -Seconds 60
+          }
