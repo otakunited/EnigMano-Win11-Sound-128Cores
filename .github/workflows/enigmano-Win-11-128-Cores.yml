@@ -1,10 +1,10 @@
-name: Jor3a-Ti9niya-RDP
+name: Jor3a-Ti9niya-RDP-CRD
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-rdp-novnc:
+  setup-chrome-rdp:
     runs-on: windows-latest
 
     steps:
@@ -34,76 +34,52 @@ jobs:
           exit 1
         }
 
-    - name: 🌐 Download Cloudflared
+    - name: 🌐 Install Chrome Remote Desktop Host
       shell: pwsh
       run: |
-        Write-Host "[DEBUG] Downloading Cloudflared..."
-        $cfExe = "$env:USERPROFILE\cloudflared.exe"
+        $CRDPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+        if (-Not (Test-Path $CRDPath)) {
+          Write-Host "[DEBUG] Chrome Remote Desktop not found, downloading..."
+          Invoke-WebRequest "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop.msi" -OutFile "$env:TEMP\crd.msi"
+          Start-Process msiexec.exe -ArgumentList "/i $env:TEMP\crd.msi /qn" -Wait
+          Write-Host "[SUCCESS] Chrome Remote Desktop installed."
+        } else {
+          Write-Host "[DEBUG] Chrome Remote Desktop already installed."
+        }
+
+    - name: 🚀 Start Chrome Remote Desktop Host
+      shell: pwsh
+      run: |
+        $CRDPath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+        $Code = "4/0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk--aUn3pnjmafaBwdk11M8XEWXUNlQ"
+        $RedirectURL = "https://remotedesktop.google.com/_/oauthredirect"
+        $ComputerName = $Env:COMPUTERNAME
+        $PIN = "123456"
+
+        Write-Host "[DEBUG] Starting Chrome Remote Desktop host..."
         try {
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfExe
-          Write-Host "[SUCCESS] Cloudflared downloaded to $cfExe"
+          $Arguments = "--code=`"$Code`" --redirect-url=`"$RedirectURL`" --name=`"$ComputerName`" --pin=`"$PIN`""
+          Write-Host "[DEBUG] Running command: $CRDPath $Arguments"
+          Start-Process -FilePath $CRDPath -ArgumentList $Arguments -NoNewWindow
+          Write-Host "[SUCCESS] Chrome Remote Desktop started successfully."
         } catch {
-          Write-Host "[FAILED] Cloudflared download failed: $_"
+          Write-Host "[FAILED] Failed to start Chrome Remote Desktop: $_"
           exit 1
         }
 
-    - name: 📦 Download noVNC
-      shell: pwsh
-      run: |
-        Write-Host "[DEBUG] Downloading noVNC..."
-        $novncDir = "$env:USERPROFILE\novnc"
-        try {
-          Invoke-WebRequest "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
-          Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath $novncDir
-          Write-Host "[SUCCESS] noVNC extracted to $novncDir"
-        } catch {
-          Write-Host "[FAILED] noVNC download/extract failed: $_"
-          exit 1
+        Write-Host "[DEBUG] Monitoring CRD process for 60 seconds..."
+        for ($i = 0; $i -lt 60; $i++) {
+          Start-Sleep -Seconds 1
+          $proc = Get-Process | Where-Object { $_.Path -eq $CRDPath }
+          if ($proc) {
+            Write-Host "[DEBUG] Process running, PID: $($proc.Id)"
+          } else {
+            Write-Host "[DEBUG] Waiting for process to start..."
+          }
         }
+        Write-Host "[SUCCESS] Chrome Remote Desktop host setup completed. Connect via https://remotedesktop.google.com/access using PIN: $PIN"
 
-    - name: 🚀 Start Websockify + Cloudflare Tunnel
-      shell: pwsh
-      run: |
-        $websockify = "$env:USERPROFILE\novnc\noVNC-master\utils\websockify\run.cmd"
-        $cfExe = "$env:USERPROFILE\cloudflared.exe"
-        $logFile = "$env:TEMP\cloudflared.log"
-
-        Write-Host "[DEBUG] Killing any existing cloudflared processes..."
-        Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-
-        Write-Host "[DEBUG] Starting Websockify noVNC (6080 -> 3389)..."
-        Start-Process -FilePath "cmd.exe" -ArgumentList "/c $websockify 6080 localhost:3389" -WindowStyle Hidden
-        Start-Sleep -Seconds 5
-        Write-Host "[SUCCESS] Websockify started."
-
-        Write-Host "[DEBUG] Starting Cloudflare Tunnel for noVNC..."
-        Start-Process -FilePath $cfExe -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate --loglevel info --logfile $logFile" -WindowStyle Hidden
-        Write-Host "[DEBUG] Cloudflare tunnel process started."
-
-        # Wait for public URL
-        Write-Host "[DEBUG] Waiting for Cloudflare public URL..."
-        $timeout = 60
-        $elapsed = 0
-        $publicUrl = $null
-        while ($elapsed -lt $timeout -and -not $publicUrl) {
-            Start-Sleep -Seconds 2
-            $elapsed += 2
-            if (Test-Path $logFile) {
-                $match = Select-String -Path $logFile -Pattern "https://.*trycloudflare.com" | Select-Object -Last 1
-                if ($match) {
-                    $publicUrl = $match.Line
-                    Write-Host "[SUCCESS] noVNC Cloudflare public URL: $publicUrl"
-                } else {
-                    Write-Host "[DEBUG] Waiting for public URL..."
-                }
-            }
-        }
-        if (-not $publicUrl) {
-            Write-Host "[FAILED] Could not retrieve public URL. Check log at $logFile"
-            exit 1
-        }
-
-    - name: 🕒 Keep GitHub Action Runner Alive
+    - name: 🕒 Keep Runner Alive
       shell: pwsh
       run: |
         Write-Host "[DEBUG] Keeping runner alive for 6 hours..."
