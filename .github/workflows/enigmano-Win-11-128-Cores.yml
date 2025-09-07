@@ -1,21 +1,37 @@
-name: Windows Runner + CRD + Countdown + Debug
+name: Windows Runner + CRD + Countdown + Full Debug
 
 on:
   workflow_dispatch:
+
+env:
+  ACTIONS_RUNNER_DEBUG: true
 
 jobs:
   setup:
     runs-on: self-hosted
     steps:
 
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        continue-on-error: false
+      - name: Check Runner Online Status
+        shell: powershell
+        run: |
+          Write-Host "[DEBUG] Checking if runner is online..."
+          try {
+              $runnerStatus = gh api repos/$Env:GITHUB_REPOSITORY/actions/runners | ConvertFrom-Json
+              if ($runnerStatus.total_count -gt 0) {
+                  Write-Host "[SUCCESS] Runner detected online."
+              } else {
+                  Write-Host "[FAILED] No self-hosted runner online. Please start your runner."
+                  exit 1
+              }
+          } catch {
+              Write-Host "[FAILED] Could not check runner status: $_"
+              exit 1
+          }
 
       - name: Set Execution Policy
         shell: powershell
         run: |
-          Write-Host "[DEBUG] Setting execution policy..."
+          Write-Host "[DEBUG] Setting PowerShell execution policy..."
           try {
               Set-ExecutionPolicy RemoteSigned -Scope Process -Force
               Write-Host "[SUCCESS] Execution policy set."
@@ -30,7 +46,7 @@ jobs:
           Write-Host "[DEBUG] Downloading CRD MSI..."
           try {
               Invoke-WebRequest -Uri "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi" -OutFile "$env:TEMP\crd.msi"
-              Write-Host "[SUCCESS] CRD downloaded."
+              Write-Host "[SUCCESS] CRD MSI downloaded."
           } catch {
               Write-Host "[FAILED] Failed to download CRD: $_"
               exit 1
@@ -51,7 +67,7 @@ jobs:
       - name: Configure Chrome Remote Desktop Host
         shell: powershell
         run: |
-          $code = "0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk"
+          $code = "4/0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk--aUn3pnjmafaBwdk11M8XEWXUNlQ"
           $pin = "123456"
           Write-Host "[DEBUG] Configuring CRD host..."
           try {
@@ -66,7 +82,7 @@ jobs:
               exit 1
           }
 
-      - name: Start Runner Service
+      - name: Start GitHub Runner Service
         shell: powershell
         run: |
           Write-Host "[DEBUG] Starting GitHub Runner service..."
