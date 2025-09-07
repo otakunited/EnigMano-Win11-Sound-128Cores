@@ -1,87 +1,100 @@
-name: Jor3a-Ti9niya-RDP-noVNC
+# ========================
+# Jor3a-Ti9niya-RDP + noVNC + Cloudflare Tunnel
+# ========================
 
-on:
-  workflow_dispatch:
+$ErrorActionPreference = "Stop"
 
-jobs:
-  setup-rdp-novnc:
-    runs-on: windows-latest
+function Timestamp { (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") }
+function Log($msg) { Write-Host "[DEBUG] $(Timestamp) $msg" }
+function Fail($msg) { Write-Host "[FAILED] $(Timestamp) $msg"; Exit 1 }
 
-    env:
-      VNC_PASSWORD: "123456"
+try {
+    # === Activer RDP ===
+    Log "Enabling Windows Remote Desktop..."
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    Log "✅ RDP enabled successfully."
+} catch { Fail "Failed to enable RDP: $_" }
 
-    steps:
-    - name: Check out repository
-      uses: actions/checkout@v2
+try {
+    # === Installer TightVNC ===
+    $vncInstaller = "$env:USERPROFILE\tightvnc.msi"
+    Log "Downloading TightVNC..."
+    Invoke-WebRequest "https://www.tightvnc.com/download/2.8.63/tightvnc-2.8.63-gpl-setup-64bit.msi" -OutFile $vncInstaller
+    Log "Installing TightVNC..."
+    Start-Process msiexec.exe -ArgumentList '/i',"$vncInstaller",'/qn','/norestart' -Wait
+    Log "✅ TightVNC installed successfully."
+} catch { Fail "TightVNC installation failed: $_" }
 
-    - name: Enable RDP
-      run: |
-        Write-Host "[DEBUG] Enabling Windows Remote Desktop..."
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Write-Host "[SUCCESS] RDP enabled."
+try {
+    # === Configurer le mot de passe VNC ===
+    $VNC_PASSWORD = "123456"
+    Log "Setting VNC password..."
+    & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -setpasswd $VNC_PASSWORD
+    Log "✅ VNC password set successfully."
+} catch { Fail "Failed to configure VNC password: $_" }
 
-    - name: Install TightVNC Server
-      run: |
-        Write-Host "[DEBUG] Downloading TightVNC..."
-        Invoke-WebRequest -Uri "https://www.tightvnc.com/download/2.8.63/tightvnc-2.8.63-gpl-setup-64bit.msi" -OutFile "$env:USERPROFILE\tightvnc.msi"
-        Write-Host "[DEBUG] Installing TightVNC silently..."
-        Start-Process msiexec.exe -ArgumentList '/i',"$env:USERPROFILE\tightvnc.msi",'/qn','/norestart' -Wait
-        Write-Host "[SUCCESS] TightVNC installed."
+try {
+    # === Démarrer TightVNC ===
+    Log "Starting TightVNC server..."
+    Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-start" -NoNewWindow
+    Start-Sleep -Seconds 5
+    Log "✅ TightVNC server started."
+} catch { Fail "Failed to start TightVNC server: $_" }
 
-    - name: Configure TightVNC password
-      run: |
-        Write-Host "[DEBUG] Setting VNC password..."
-        & "C:\Program Files\TightVNC\tvnserver.exe" -controlapp -setpasswd $env:VNC_PASSWORD
-        Write-Host "[SUCCESS] VNC password configured."
+try {
+    # === Installer Python pour websockify ===
+    Log "Installing Python..."
+    Invoke-WebRequest "https://www.python.org/ftp/python/3.11.8/python-3.11.8-amd64.exe" -OutFile "$env:USERPROFILE\python-installer.exe"
+    Start-Process "$env:USERPROFILE\python-installer.exe" -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1" -Wait
+    Log "✅ Python installed."
+    & python --version
+} catch { Fail "Python installation failed: $_" }
 
-    - name: Start TightVNC Server
-      run: |
-        Write-Host "[DEBUG] Starting TightVNC server..."
-        Start-Process -FilePath "C:\Program Files\TightVNC\tvnserver.exe" -ArgumentList "-start" -NoNewWindow
-        Start-Sleep -Seconds 5
-        Write-Host "[SUCCESS] TightVNC server started."
+try {
+    # === Installer websockify ===
+    Log "Installing websockify..."
+    pip install --upgrade pip
+    pip install websockify
+    Log "✅ websockify installed."
+} catch { Fail "websockify installation failed: $_" }
 
-    - name: Install Python (for websockify/noVNC)
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+try {
+    # === Télécharger noVNC ===
+    $noVNCPath = "$env:USERPROFILE\novnc"
+    Log "Downloading noVNC..."
+    Invoke-WebRequest "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
+    Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath $noVNCPath
+    Log "✅ noVNC downloaded to $noVNCPath."
+} catch { Fail "noVNC download failed: $_" }
 
-    - name: Install websockify
-      run: |
-        Write-Host "[DEBUG] Installing websockify..."
-        pip install --upgrade pip
-        pip install websockify
-        Write-Host "[SUCCESS] websockify installed."
+try {
+    # === Démarrer noVNC sur port 6080 ===
+    Log "Starting noVNC (websockify)..."
+    Start-Process -FilePath "python" -ArgumentList "-m websockify 6080 localhost:5900 --web $noVNCPath\noVNC-master" -NoNewWindow
+    Start-Sleep -Seconds 5
+    Log "✅ noVNC started on port 6080."
+} catch { Fail "Failed to start noVNC: $_" }
 
-    - name: Download noVNC
-      run: |
-        Write-Host "[DEBUG] Downloading noVNC..."
-        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
-        Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath "$env:USERPROFILE\novnc"
-        Write-Host "[SUCCESS] noVNC downloaded."
+try {
+    # === Télécharger Cloudflared ===
+    $cloudflaredExe = "$env:USERPROFILE\cloudflared.exe"
+    Log "Downloading cloudflared..."
+    Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cloudflaredExe
+    Log "✅ cloudflared downloaded."
+} catch { Fail "Cloudflared download failed: $_" }
 
-    - name: Start noVNC
-      run: |
-        Write-Host "[DEBUG] Starting noVNC (websockify)..."
-        Start-Process -FilePath "python" -ArgumentList "-m websockify 6080 localhost:5900 --web $env:USERPROFILE\novnc\novnc-master" -NoNewWindow
-        Start-Sleep -Seconds 5
-        Write-Host "[SUCCESS] noVNC started on port 6080."
+try {
+    # === Démarrer le tunnel Cloudflare pour noVNC ===
+    Log "Starting Cloudflare Tunnel..."
+    Start-Process -FilePath $cloudflaredExe -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate --loglevel info" -NoNewWindow
+    Start-Sleep -Seconds 10
+    Log "✅ Cloudflare Tunnel started. The public URL will appear in the cloudflared logs."
+} catch { Fail "Failed to start Cloudflare Tunnel: $_" }
 
-    - name: Install Cloudflared
-      run: |
-        Write-Host "[DEBUG] Downloading cloudflared..."
-        Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
-        Write-Host "[SUCCESS] cloudflared downloaded."
+Log "All services started successfully. Use cloudflared logs to get the public URL for noVNC."
 
-    - name: Start Cloudflare Tunnel
-      run: |
-        Write-Host "[DEBUG] Starting Cloudflare Tunnel for noVNC..."
-        Start-Process -FilePath "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -NoNewWindow
-        Start-Sleep -Seconds 10
-        Write-Host "[SUCCESS] Cloudflare Tunnel started. Check logs for public URL."
-
-    - name: Keep Workflow Alive
-      run: |
-        Write-Host "[DEBUG] Keeping workflow alive for 6 hours..."
-        Start-Sleep -Seconds 21600
+# Keep the script alive for 6 hours
+Log "Keeping session alive for 6 hours..."
+Start-Sleep -Seconds 21600
+Log "Session ended."
