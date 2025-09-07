@@ -1,126 +1,78 @@
-name: "⚡ EnigMano Win11 + 128 Cores via Cloudflare"
+name: "⚡ EnigMano Win11 via Chrome Remote Desktop"
 
 on:
   workflow_dispatch:
     inputs:
-      INSTANCE:
-        description: "Instance number to deploy (e.g., 1, 2, 3...)"
+      CRD_CODE:
+        description: "Chrome Remote Desktop Auth Code"
         required: true
-        default: "1"
+        default: "4/xxxxxxx"
 
 jobs:
-  deploy-enigmano:
-    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
-    runs-on: windows-11-arm
-
-    env:
-      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
-      REPO: ${{ github.repository }}
-      WORKFLOW_FILE: "enigmano-Win-11-128-Cores.yml"
-      DEPLOYMENT_ID: ${{ github.run_id }}
+  deploy-crd:
+    name: "🚀 Deploy Win11 + CRD"
+    runs-on: windows-2022
 
     steps:
-      - name: 📌 Deployment Parameters
-        shell: pwsh
-        run: |
-          $prevInstance = [int]$env:INSTANCE_ID - 1
-          Write-Host "==============================================="
-          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
-          Write-Host "🔢 Previous Instance     : $prevInstance"
-          Write-Host "📦 GitHub Repository     : $env:REPO"
-          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
-          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
-          Write-Host "==============================================="
-
-      - name: ⚔️ Execute EnigMano Unified Script
+      - name: ⚙️ Setup Environment
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
           function Timestamp { (Get-Date).ToString("yyyy-MM-dd HH:mm:ss") }
-          function Log($msg) { Write-Host "[ENIGMANO $(Timestamp)] $msg" }
-          function Fail($msg) { Write-Error "[ENIGMANO-ERROR $(Timestamp)] $msg"; Exit 1 }
+          function Log($msg) { Write-Host "[CRD $(Timestamp)] $msg" }
+          function Fail($msg) { Write-Error "[CRD-ERROR $(Timestamp)] $msg"; Exit 1 }
 
-          $now = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-          Write-Host @"
-          ----------------------------------------------------
-                   ENIGMANO INSTANCE $env:INSTANCE_ID BOOTING
-          ----------------------------------------------------
-            STATUS    : Initializing deployment sequence
-            TIME      : $now
-            ARCHITECT : SHAHZAIB-YT (patched by Lyra)
-          ----------------------------------------------------
-          "@
+          Log "🔹 Initialisation de l’environnement"
 
-          # === ACTIVER RDP ===
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "UserAuthentication" -Value 1
-          $secPass = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
-          Set-LocalUser -Name "runneradmin" -Password $secPass
-          Log "✅ RDP activé avec user=runneradmin / pass=P@ssw0rd!"
-
-          # === INSTALL CLOUDFLARED ===
-          Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
-          Log "✅ Cloudflared téléchargé"
-
-          # === LANCER LE TUNNEL CLOUDFLARE AVEC LOGS SÉPARÉS ===
-          Log "⏳ Démarrage tunnel Cloudflare..."
-          $tunnelOut = "cloudflared_out.txt"
-          $tunnelErr = "cloudflared_err.txt"
-
-          Start-Process -FilePath ".\cloudflared.exe" `
-            -ArgumentList "tunnel --url rdp://localhost:3389" `
-            -NoNewWindow `
-            -RedirectStandardOutput $tunnelOut `
-            -RedirectStandardError $tunnelErr
-
-          Start-Sleep -Seconds 8
-
-          $url = $null
-          for ($i=0; $i -lt 12; $i++) {
-            $logs = ""
-            if (Test-Path $tunnelOut) { $logs += Get-Content $tunnelOut -Raw }
-            if (Test-Path $tunnelErr) { $logs += "`n" + (Get-Content $tunnelErr -Raw) }
-
-            if ($logs -match "https:\/\/[a-z0-9-]+\.trycloudflare\.com") {
-              $url = $Matches[0]
-              break
-            }
-            Start-Sleep -Seconds 5
-          }
-
-          if ($null -eq $url) {
-            Fail "Impossible de récupérer l’URL du tunnel Cloudflare après plusieurs tentatives"
-          } else {
-            Log "🌐 Tunnel Cloudflare prêt: $url"
-          }
-
-          # === INSTALL APPS SECONDAIRES ===
+          # Facultatif : activer RDP standard
           try {
-              Log "Déploiement Brave-Browser..."
-              Invoke-WebRequest "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/Brave-Browser.ps1" -OutFile Brave-Browser.ps1
-              .\Brave-Browser.ps1
-          } catch { Fail "Brave Browser installation failed: $_" }
+            Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+            Log "✅ RDP local activé"
+          } catch { Log "⚠️ Impossible d’activer RDP local : $_" }
 
-          try {
-              Log "Déploiement IDM..."
-              Invoke-WebRequest "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/Download_Manager.ps1" -OutFile Download_Manager.ps1
-              .\Download_Manager.ps1
-          } catch { Fail "Download Manager installation failed: $_" }
+      - name: 🖥️ Installer Chrome Remote Desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Log($msg) { Write-Host "[CRD $(Get-Date -Format "HH:mm:ss")] $msg" }
+          
+          Log "⏳ Téléchargement CRD..."
+          Invoke-WebRequest "https://dl.google.com/chrome-remote-desktop/current/chromeremotedesktophost.msi" -OutFile "crd.msi"
 
-          # === TIMER INSTANCE (AUTO SHUTDOWN) ===
-          $totalMinutes = 340
-          $startTime = Get-Date
-          $endTime = $startTime.AddMinutes($totalMinutes)
+          Log "⏳ Installation CRD..."
+          Start-Process msiexec.exe -ArgumentList "/i crd.msi /qn" -Wait
+          Log "✅ Chrome Remote Desktop installé"
 
-          while ((Get-Date) -lt $endTime) {
-              $now = Get-Date
-              $elapsed = [math]::Round(($now - $startTime).TotalMinutes, 1)
-              $remaining = [math]::Round(($endTime - $now).TotalMinutes, 1)
-              Log "⏳ Uptime: $elapsed min | Restant: $remaining min"
-              Start-Sleep -Seconds 900
+      - name: 🚀 Lancer Chrome Remote Desktop Host
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Log($msg) { Write-Host "[CRD $(Get-Date -Format "HH:mm:ss")] $msg" }
+          function Fail($msg) { Write-Error "[CRD-ERROR $(Get-Date -Format "HH:mm:ss")] $msg"; Exit 1 }
+
+          $crdExe = "${env:ProgramFiles(x86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (-Not (Test-Path $crdExe)) {
+            Fail "❌ Fichier CRD introuvable : $crdExe"
           }
 
-          Log "🔴 Arrêt instance EnigMano $env:INSTANCE_ID"
-          Exit
+          $authCode = "${{ github.event.inputs.CRD_CODE }}"
+          if ([string]::IsNullOrWhiteSpace($authCode)) {
+            Fail "❌ Aucun code CRD fourni"
+          }
+
+          Log "⏳ Lancement CRD avec code $authCode"
+          Start-Process -FilePath $crdExe `
+            -ArgumentList "--code=`"$authCode`" --redirect-url=https://remotedesktop.google.com/_/oauthredirect --name=$env:COMPUTERNAME" `
+            -NoNewWindow -PassThru
+          
+          Log "✅ Chrome Remote Desktop Host démarré"
+          Log "➡️ Connecte-toi sur https://remotedesktop.google.com/access"
+
+      - name: 🕒 Keep Alive
+        shell: pwsh
+        run: |
+          for ($i=0; $i -lt 48; $i++) {
+            Write-Host "[CRD $(Get-Date -Format "HH:mm:ss")] 💓 Instance active ($i/48)"
+            Start-Sleep -Seconds 900
+          }
