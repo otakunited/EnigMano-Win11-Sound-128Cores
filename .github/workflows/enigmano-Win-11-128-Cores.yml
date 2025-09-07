@@ -1,83 +1,56 @@
-name: RDP via noVNC + Cloudflare TCP
+name: Jor3a-Ti9niya-RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp-novnc-tunnel:
-    runs-on: [self-hosted, windows]
+  setup-rdp-novnc:
+    runs-on: windows-latest
 
     steps:
-      - name: 📌 Checkout Repository
-        uses: actions/checkout@v2
+    - name: Check out the repository
+      uses: actions/checkout@v2
 
-      - name: ⚙️ Enable Remote Desktop
-        shell: pwsh
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-          Write-Host "[SUCCESS] RDP enabled"
+    # === Active RDP ===
+    - name: Enable TS
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "admin@123" -Force)
 
-      - name: 👤 Create RDP User
-        shell: pwsh
-        run: |
-          $pass = ConvertTo-SecureString "admin@123" -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "runneradmin" -Password $pass -FullName "RDP Admin"
-              Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
-          }
-          Write-Host "[SUCCESS] User runneradmin created"
+    # === Télécharger Cloudflared ===
+    - name: Download and Install Cloudflared
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
+        Start-Sleep -Seconds 5
 
-      - name: 🌐 Download Cloudflared
-        shell: pwsh
-        run: |
-          $cfPath = "$env:USERPROFILE\cloudflared.exe"
-          Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfPath
-          Write-Host "[SUCCESS] Cloudflared downloaded"
+    # === Télécharger noVNC et Websockify ===
+    - name: Download noVNC
+      run: |
+        $novncDir = "$env:USERPROFILE\novnc"
+        Invoke-WebRequest "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
+        Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath $novncDir
 
-      - name: 🚀 Start Cloudflare TCP Tunnel
-        shell: pwsh
-        run: |
-          $cfExe = "$env:USERPROFILE\cloudflared.exe"
-          $logFile = "$env:TEMP\cloudflared.log"
-          Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          Start-Process -FilePath $cfExe -ArgumentList "tunnel --url tcp://localhost:3389 --no-autoupdate --loglevel info --logfile $logFile" -WindowStyle Hidden
-          $timeout = 60; $elapsed = 0; $publicUrl = $null
-          while ($elapsed -lt $timeout -and -not $publicUrl) {
-              Start-Sleep -Seconds 2
-              $elapsed += 2
-              if (Test-Path $logFile) {
-                  $publicUrl = Select-String -Path $logFile -Pattern "tcp://.*trycloudflare.com" | Select-Object -Last 1
-                  if ($publicUrl) { Write-Host "[SUCCESS] Cloudflare Tunnel URL: $($publicUrl.Line)" }
-                  else { Write-Host "[DEBUG] Waiting for public TCP URL..." }
-              }
-          }
-          if (-not $publicUrl) { Write-Host "[FAILED] Could not retrieve TCP endpoint"; exit 1 }
+    # === Lancer Cloudflare Tunnel + Websockify pour noVNC ===
+    - name: Start Cloudflare Tunnel + noVNC
+      run: |
+        $cfExe = "$env:USERPROFILE\cloudflared.exe"
+        $logFile = "$env:TEMP\cloudflared.log"
 
-      - name: 🖥 Download noVNC + Websockify
-        shell: pwsh
-        run: |
-          $novncDir = "$env:USERPROFILE\novnc"
-          Invoke-WebRequest "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
-          Expand-Archive "$env:USERPROFILE\novnc.zip" -DestinationPath $novncDir
-          Write-Host "[SUCCESS] noVNC downloaded"
+        # Kill any existing cloudflared
+        Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-      - name: 🔗 Start Websockify for RDP-to-Web
-        shell: pwsh
-        run: |
-          Write-Host "[DEBUG] Starting Websockify for noVNC..."
-          $websockify = "$env:USERPROFILE\novnc\noVNC-master\utils\websockify\run.cmd"
-          # Expose RDP port via WebSocket on port 6080
-          Start-Process -FilePath "cmd.exe" -ArgumentList "/c $websockify 6080 localhost:3389" -WindowStyle Hidden
-          Write-Host "[SUCCESS] noVNC WebSocket server running at http://localhost:6080"
+        # Start Cloudflare TCP tunnel (local port 6080 pour noVNC)
+        Start-Process -FilePath $cfExe -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate --loglevel info --logfile $logFile" -WindowStyle Hidden
 
-      - name: ⏱ Keep Runner Alive for 6h
-        shell: pwsh
-        run: |
-          $endTime = (Get-Date).AddHours(6)
-          while ((Get-Date) -lt $endTime) {
-              $remaining = $endTime - (Get-Date)
-              Write-Host "⏳ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
-              Start-Sleep -Seconds 60
-          }
+        # Start Websockify noVNC
+        $websockify = "$env:USERPROFILE\novnc\noVNC-master\utils\websockify\run.cmd"
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/c $websockify 6080 localhost:3389" -WindowStyle Hidden
+
+        Write-Host "[DEBUG] noVNC + Cloudflare tunnel started. Connect via browser when public URL is available."
+
+    # === Keep alive ===
+    - name: Keep the GitHub Action Runner Alive
+      run: |
+        Start-Sleep -Seconds 21600
