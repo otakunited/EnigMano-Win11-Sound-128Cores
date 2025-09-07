@@ -1,48 +1,97 @@
-name: Windows Runner + Chrome Remote Desktop
+name: Windows Runner + CRD + Countdown + Debug
 
 on:
-  workflow_dispatch: # permet de lancer manuellement le workflow
+  workflow_dispatch:
 
 jobs:
-  setup-windows-runner:
+  setup:
     runs-on: self-hosted
     steps:
 
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v3
+        continue-on-error: false
 
-      - name: Ensure PowerShell execution policy
-        run: |
-          Set-ExecutionPolicy RemoteSigned -Scope Process -Force
-
-      - name: Download Chrome Remote Desktop Host
-        run: |
-          Invoke-WebRequest `
-            -Uri "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi" `
-            -OutFile "$env:TEMP\crd.msi"
-
-      - name: Install Chrome Remote Desktop silently
-        run: |
-          Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\crd.msi", '/qn', '/norestart' -Wait
-
-      - name: Configure Chrome Remote Desktop host
+      - name: Set Execution Policy
         shell: powershell
         run: |
-          $code = "VOTRE_TOKEN_OAUTH"  # Remplacer par le token généré
-          $pin = "123456"              # Remplacer par votre PIN
-          & "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" `
-              --code="$code" `
-              --redirect-url="https://remotedesktop.google.com/_/oauthredirect" `
-              --name=$Env:COMPUTERNAME `
-              --pin="$pin"
+          Write-Host "[DEBUG] Setting execution policy..."
+          try {
+              Set-ExecutionPolicy RemoteSigned -Scope Process -Force
+              Write-Host "[SUCCESS] Execution policy set."
+          } catch {
+              Write-Host "[FAILED] Could not set execution policy: $_"
+              exit 1
+          }
 
-      - name: Verify Chrome Remote Desktop service
+      - name: Download Chrome Remote Desktop
         shell: powershell
         run: |
-          Get-Service "chromoting" | Select-Object Status, StartType
+          Write-Host "[DEBUG] Downloading CRD MSI..."
+          try {
+              Invoke-WebRequest -Uri "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi" -OutFile "$env:TEMP\crd.msi"
+              Write-Host "[SUCCESS] CRD downloaded."
+          } catch {
+              Write-Host "[FAILED] Failed to download CRD: $_"
+              exit 1
+          }
 
-      - name: Start your Windows workflow tasks
+      - name: Install Chrome Remote Desktop
         shell: powershell
         run: |
-          echo "GitHub Runner is ready and Chrome Remote Desktop is running."
-          # Ici tu peux lancer tes scripts/tests spécifiques Windows
+          Write-Host "[DEBUG] Installing CRD..."
+          try {
+              Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\crd.msi", '/qn', '/norestart' -Wait
+              Write-Host "[SUCCESS] CRD installed."
+          } catch {
+              Write-Host "[FAILED] CRD installation failed: $_"
+              exit 1
+          }
+
+      - name: Configure Chrome Remote Desktop Host
+        shell: powershell
+        run: |
+          $code = "0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk"
+          $pin = "123456"
+          Write-Host "[DEBUG] Configuring CRD host..."
+          try {
+              & "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe" `
+                  --code=$code `
+                  --redirect-url="https://remotedesktop.google.com/_/oauthredirect" `
+                  --name=$Env:COMPUTERNAME `
+                  --pin=$pin
+              Write-Host "[SUCCESS] CRD host configured."
+          } catch {
+              Write-Host "[FAILED] CRD configuration failed: $_"
+              exit 1
+          }
+
+      - name: Start Runner Service
+        shell: powershell
+        run: |
+          Write-Host "[DEBUG] Starting GitHub Runner service..."
+          try {
+              Start-Service -Name "actions.runner.*.service"
+              Write-Host "[SUCCESS] Runner service started."
+          } catch {
+              Write-Host "[FAILED] Failed to start runner service: $_"
+              exit 1
+          }
+
+      - name: Countdown Timer 6h
+        shell: powershell
+        run: |
+          Write-Host "[DEBUG] Starting countdown timer for 6 hours..."
+          $duration = New-TimeSpan -Hours 6
+          $endTime = (Get-Date).Add($duration)
+          try {
+              while ((Get-Date) -lt $endTime) {
+                  $remaining = $endTime - (Get-Date)
+                  Write-Host "⏱ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
+                  Start-Sleep -Seconds 1
+              }
+              Write-Host "[SUCCESS] Countdown finished!"
+          } catch {
+              Write-Host "[FAILED] Countdown encountered an error: $_"
+              exit 1
+          }
