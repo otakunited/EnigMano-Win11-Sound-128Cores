@@ -1,71 +1,66 @@
-name: Windows Runner + CRD + Countdown + Full Debug
+name: "⚡ EnigMano Win11 + CRD Deployment"
 
 on:
   workflow_dispatch:
-
-env:
-  ACTIONS_RUNNER_DEBUG: true
+    inputs:
+      INSTANCE:
+        description: "Instance number to deploy (e.g., 1, 2, 3...)"
+        required: true
+        default: "1"
 
 jobs:
-  setup:
+  deploy-enigmano:
+    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
     runs-on: self-hosted
+
+    env:
+      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
+      REPO: ${{ github.repository }}
+      WORKFLOW_FILE: "enigmano-Win11-CRD.yml"
+      DEPLOYMENT_ID: ${{ github.run_id }}
+
     steps:
-
-      - name: Check Runner Online Status
-        shell: powershell
+      - name: 📌 Deployment Parameters
+        shell: pwsh
         run: |
-          Write-Host "[DEBUG] Checking if runner is online..."
-          try {
-              $runnerStatus = gh api repos/$Env:GITHUB_REPOSITORY/actions/runners | ConvertFrom-Json
-              if ($runnerStatus.total_count -gt 0) {
-                  Write-Host "[SUCCESS] Runner detected online."
-              } else {
-                  Write-Host "[FAILED] No self-hosted runner online. Please start your runner."
-                  exit 1
-              }
-          } catch {
-              Write-Host "[FAILED] Could not check runner status: $_"
-              exit 1
-          }
+          $prevInstance = [int]$env:INSTANCE_ID - 1
+          Write-Host "==============================================="
+          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
+          Write-Host "🔢 Previous Instance     : $prevInstance"
+          Write-Host "📦 GitHub Repository     : $env:REPO"
+          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
+          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
+          Write-Host "==============================================="
 
-      - name: Set Execution Policy
-        shell: powershell
+      - name: 🔐 Configure PowerShell & Runner
+        shell: pwsh
         run: |
-          Write-Host "[DEBUG] Setting PowerShell execution policy..."
+          Write-Host "[DEBUG] Setting execution policy..."
           try {
               Set-ExecutionPolicy RemoteSigned -Scope Process -Force
               Write-Host "[SUCCESS] Execution policy set."
-          } catch {
-              Write-Host "[FAILED] Could not set execution policy: $_"
-              exit 1
-          }
+          } catch { Write-Host "[FAILED] Failed to set execution policy: $_"; exit 1 }
 
-      - name: Download Chrome Remote Desktop
-        shell: powershell
+      - name: 📥 Download Chrome Remote Desktop
+        shell: pwsh
         run: |
           Write-Host "[DEBUG] Downloading CRD MSI..."
           try {
               Invoke-WebRequest -Uri "https://dl.google.com/chrome-remote-desktop/chrome-remote-desktop_current_amd64.msi" -OutFile "$env:TEMP\crd.msi"
-              Write-Host "[SUCCESS] CRD MSI downloaded."
-          } catch {
-              Write-Host "[FAILED] Failed to download CRD: $_"
-              exit 1
-          }
+              Write-Host "[SUCCESS] CRD downloaded."
+          } catch { Write-Host "[FAILED] Failed to download CRD: $_"; exit 1 }
 
-      - name: Install Chrome Remote Desktop
-        shell: powershell
+      - name: ⚙️ Install Chrome Remote Desktop
+        shell: pwsh
         run: |
           Write-Host "[DEBUG] Installing CRD..."
           try {
               Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\crd.msi", '/qn', '/norestart' -Wait
               Write-Host "[SUCCESS] CRD installed."
-          } catch {
-              Write-Host "[FAILED] CRD installation failed: $_"
-              exit 1
-          }
+          } catch { Write-Host "[FAILED] CRD installation failed: $_"; exit 1 }
 
-      - name: Configure Chrome Remote Desktop Host
-        shell: powershell
+      - name: 🔑 Configure CRD Host
+        shell: pwsh
         run: |
           $code = "4/0AVMBsJiIdkqeHq3dOOlekXZuom4C6FbDDzrvbE8qk--aUn3pnjmafaBwdk11M8XEWXUNlQ"
           $pin = "123456"
@@ -77,37 +72,27 @@ jobs:
                   --name=$Env:COMPUTERNAME `
                   --pin=$pin
               Write-Host "[SUCCESS] CRD host configured."
-          } catch {
-              Write-Host "[FAILED] CRD configuration failed: $_"
-              exit 1
-          }
+          } catch { Write-Host "[FAILED] CRD configuration failed: $_"; exit 1 }
 
-      - name: Start GitHub Runner Service
-        shell: powershell
+      - name: ⏱ Countdown Timer 6h
+        shell: pwsh
         run: |
-          Write-Host "[DEBUG] Starting GitHub Runner service..."
-          try {
-              Start-Service -Name "actions.runner.*.service"
-              Write-Host "[SUCCESS] Runner service started."
-          } catch {
-              Write-Host "[FAILED] Failed to start runner service: $_"
-              exit 1
-          }
-
-      - name: Countdown Timer 6h
-        shell: powershell
-        run: |
-          Write-Host "[DEBUG] Starting countdown timer for 6 hours..."
+          Write-Host "[DEBUG] Starting 6-hour countdown..."
           $duration = New-TimeSpan -Hours 6
           $endTime = (Get-Date).Add($duration)
           try {
               while ((Get-Date) -lt $endTime) {
                   $remaining = $endTime - (Get-Date)
-                  Write-Host "⏱ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
+                  Write-Host "⏳ Time remaining: $($remaining.Hours)h $($remaining.Minutes)m $($remaining.Seconds)s"
                   Start-Sleep -Seconds 1
               }
               Write-Host "[SUCCESS] Countdown finished!"
-          } catch {
-              Write-Host "[FAILED] Countdown encountered an error: $_"
-              exit 1
-          }
+          } catch { Write-Host "[FAILED] Countdown encountered an error: $_"; exit 1 }
+
+      - name: 💠 Final Status
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
+          Write-Host "🔋 Powered by: SHAHZAIB-YT"
+          Write-Host "🏁 Deployment executed with full debug logging."
