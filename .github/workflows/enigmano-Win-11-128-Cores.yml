@@ -1,4 +1,4 @@
-name: "⚡ EnigMano Win11 + 128 Cores Deployment"
+name: "⚡ EnigMano Win11 + Cloudflare + NoVNC"
 
 on:
   workflow_dispatch:
@@ -11,64 +11,77 @@ on:
 jobs:
   deploy-enigmano:
     name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
-    runs-on: windows-11-arm
+    runs-on: windows-latest
 
     env:
       INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
       SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
-      NGROK_SHAHZAIB: ${{ secrets.NGROK_SHAHZAIB }}
-      REPO: ${{ github.repository }}
-      WORKFLOW_FILE: "enigmano-Win-11-128-Cores.yml"
+      CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_TOKEN }}
       DEPLOYMENT_ID: ${{ github.run_id }}
 
     steps:
       - name: 📌 Deployment Parameters
         shell: pwsh
         run: |
-          $prevInstance = [int]$env:INSTANCE_ID - 1
-          Write-Host "==============================================="
-          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
-          Write-Host "🔢 Previous Instance     : $prevInstance"
-          Write-Host "📦 GitHub Repository     : $env:REPO"
-          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
-          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
-          Write-Host "==============================================="
+          Write-Host "🔹 Instance ID: $env:INSTANCE_ID"
+          Write-Host "🆔 Deployment ID: $env:DEPLOYMENT_ID"
 
       - name: 🔐 Validate Secrets
         shell: pwsh
         run: |
-          if (-not $env:SECRET_SHAHZAIB) {
-            Write-Error "❌ Missing GitHub Secret: SECRET_SHAHZAIB"
-            exit 1
-          }
-          if (-not $env:NGROK_SHAHZAIB) {
-            Write-Error "❌ Missing Ngrok Auth Token: NGROK_SHAHZAIB"
-            exit 1
-          }
-          Write-Host "✅ All required secrets validated successfully"
+          if (-not $env:SECRET_SHAHZAIB) { Write-Error "❌ Missing SECRET_SHAHZAIB"; exit 1 }
+          if (-not $env:CLOUDFLARE_TOKEN) { Write-Error "❌ Missing CLOUDFLARE_TOKEN"; exit 1 }
+          Write-Host "✅ Secrets validated."
 
-      - name: 📥 Download EnigMano-instance.ps1
+      - name: ⚡ Setup RDP Access
         shell: pwsh
         run: |
-          $url = "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/EnigMano-Instance.ps1"
-          Write-Host "🌐 Downloading EnigMano-Instance.ps1..."
-          Invoke-WebRequest -Uri $url -OutFile "EnigMano-Instance.ps1" -UseBasicParsing
-          if (!(Test-Path "./EnigMano-Instance.ps1")) {
-            Write-Error "❌ Failed to download EnigMano-Instance.ps1"
-            exit 1
-          }
-          Write-Host "✅ EnigMano-Instance.ps1 downloaded successfully"
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          $secPass = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $secPass
+          Write-Host "✅ RDP Enabled with user: runneradmin / pass: P@ssw0rd!"
 
-      - name: ⚔️ Execute EnigMano Instance Script
+      - name: 🌐 Install Cloudflared
         shell: pwsh
         run: |
-          Write-Host "🚦 Initiating EnigMano-Instance.ps1"
-          powershell.exe -ExecutionPolicy Bypass -File ".\EnigMano-Instance.ps1"
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+          if (!(Test-Path "cloudflared.exe")) { Write-Error "❌ cloudflared download failed"; exit 1 }
+          Write-Host "✅ cloudflared installed"
+
+      - name: 🚇 Start Cloudflare Tunnel (RDP)
+        shell: pwsh
+        run: |
+          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --no-autoupdate --protocol http2 --url rdp://localhost:3389 --metrics localhost:4050 --edge-ip-version auto --hello-world" -WindowStyle Hidden
+          Start-Sleep -Seconds 10
+          Write-Host "✅ Cloudflare Tunnel started on port 3389 (RDP)"
+
+      - name: 🖥 Install NoVNC + Websockify
+        shell: pwsh
+        run: |
+          # Installer Python + pip
+          choco install -y python
+          pip install --upgrade pip
+          pip install websockify
+
+          # Télécharger NoVNC
+          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "novnc.zip"
+          Expand-Archive novnc.zip -DestinationPath .
+          Rename-Item "noVNC-master" "noVNC"
+
+          Write-Host "✅ NoVNC + Websockify ready"
+
+      - name: 🚀 Start NoVNC
+        shell: pwsh
+        run: |
+          Start-Process -NoNewWindow -FilePath "python" -ArgumentList "-m websockify 6080 localhost:3389"
+          Start-Sleep -Seconds 8
+          Write-Host "✅ NoVNC started at http://localhost:6080/vnc.html"
 
       - name: 💠 Final Status
         if: always()
         shell: pwsh
         run: |
-          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
-          Write-Host "🔋 Powered by: SHAHZAIB-YT"
-          Write-Host "🏁 EnigMano deployment executed with tactical precision."
+          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID running"
+          Write-Host "🔑 User: runneradmin | Pass: P@ssw0rd!"
+          Write-Host "🌐 RDP Tunnel + NoVNC operational."
