@@ -1,0 +1,8 @@
+- name: Show system info
+  run: |
+    echo "=== RAM ==="
+    systeminfo | findstr /C:"Total Physical Memory"
+    echo "=== CPU ==="
+    wmic cpu get name,NumberOfCores,NumberOfLogicalProcessors
+    echo "=== PAGEFILE (swap) ==="
+    wmic pagefile get AllocatedBaseSize,CurrentUsage,PeakUsage
