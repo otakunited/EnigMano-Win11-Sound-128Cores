@@ -1,63 +1,74 @@
-name: Jor3a-Ti9niya-RDP-noVNC
+name: "⚡ EnigMano Win11 + 128 Cores Deployment"
 
 on:
   workflow_dispatch:
+    inputs:
+      INSTANCE:
+        description: "Instance number to deploy (e.g., 1, 2, 3...)"
+        required: true
+        default: "1"
 
 jobs:
-  setup-rdp-novnc:
-    runs-on: windows-latest
+  deploy-enigmano:
+    name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
+    runs-on: windows-11-arm
+
+    env:
+      INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
+      SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
+      NGROK_SHAHZAIB: ${{ secrets.NGROK_SHAHZAIB }}
+      REPO: ${{ github.repository }}
+      WORKFLOW_FILE: "enigmano-Win-11-128-Cores.yml"
+      DEPLOYMENT_ID: ${{ github.run_id }}
 
     steps:
-    - name: Enable RDP
-      run: |
-        # Autoriser les connexions RDP
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        # Créer un utilisateur pour RDP si non existant
-        $Password = ConvertTo-SecureString "admin@123" -AsPlainText -Force
-        if (-Not (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "runneradmin" -Password $Password -FullName "RDP User"
-            Add-LocalGroupMember -Group "Administrators" -Member "runneradmin"
-        }
+      - name: 📌 Deployment Parameters
+        shell: pwsh
+        run: |
+          $prevInstance = [int]$env:INSTANCE_ID - 1
+          Write-Host "==============================================="
+          Write-Host "🔹 EnigMano Instance     : $env:INSTANCE_ID"
+          Write-Host "🔢 Previous Instance     : $prevInstance"
+          Write-Host "📦 GitHub Repository     : $env:REPO"
+          Write-Host "🔁 Deployment Workflow   : $env:WORKFLOW_FILE"
+          Write-Host "🆔 Deployment ID         : $env:DEPLOYMENT_ID"
+          Write-Host "==============================================="
 
-    - name: Install Python (pour noVNC)
-      run: |
-        choco install python -y
-        refreshenv
+      - name: 🔐 Validate Secrets
+        shell: pwsh
+        run: |
+          if (-not $env:SECRET_SHAHZAIB) {
+            Write-Error "❌ Missing GitHub Secret: SECRET_SHAHZAIB"
+            exit 1
+          }
+          if (-not $env:NGROK_SHAHZAIB) {
+            Write-Error "❌ Missing Ngrok Auth Token: NGROK_SHAHZAIB"
+            exit 1
+          }
+          Write-Host "✅ All required secrets validated successfully"
 
-    - name: Download TigerVNC server
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/TigerVNC/tigervnc/releases/download/v1.13.0/tigervnc-1.13.0-vc14-x64.exe" -OutFile "$env:USERPROFILE\tigervnc.exe"
+      - name: 📥 Download EnigMano-instance.ps1
+        shell: pwsh
+        run: |
+          $url = "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/EnigMano-Instance.ps1"
+          Write-Host "🌐 Downloading EnigMano-Instance.ps1..."
+          Invoke-WebRequest -Uri $url -OutFile "EnigMano-Instance.ps1" -UseBasicParsing
+          if (!(Test-Path "./EnigMano-Instance.ps1")) {
+            Write-Error "❌ Failed to download EnigMano-Instance.ps1"
+            exit 1
+          }
+          Write-Host "✅ EnigMano-Instance.ps1 downloaded successfully"
 
-    - name: Install TigerVNC silently
-      run: |
-        Start-Process "$env:USERPROFILE\tigervnc.exe" -ArgumentList "/S" -Wait
+      - name: ⚔️ Execute EnigMano Instance Script
+        shell: pwsh
+        run: |
+          Write-Host "🚦 Initiating EnigMano-Instance.ps1"
+          powershell.exe -ExecutionPolicy Bypass -File ".\EnigMano-Instance.ps1"
 
-    - name: Start VNC Server
-      run: |
-        # Crée un fichier de mot de passe temporaire
-        mkdir "$env:USERPROFILE\.vnc" -Force
-        echo "admin" | vncpasswd -f > "$env:USERPROFILE\.vnc\passwd"
-        # Démarre VNC sur le port 5901
-        Start-Process "C:\Program Files\TigerVNC\vncserver.exe" -ArgumentList ":1 -SecurityTypes None" -NoNewWindow
-
-    - name: Download cloudflared
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:USERPROFILE\cloudflared.exe"
-
-    - name: Start cloudflared tunnel for VNC
-      run: |
-        Start-Process "$env:USERPROFILE\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:5901" -NoNewWindow
-
-    - name: Download noVNC
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$env:USERPROFILE\novnc.zip"
-        Expand-Archive -Path "$env:USERPROFILE\novnc.zip" -DestinationPath "$env:USERPROFILE\novnc"
-
-    - name: Start noVNC web client
-      run: |
-        Start-Process "python" -ArgumentList "-m http.server 6080 --directory $env:USERPROFILE\novnc\novnc-master" -NoNewWindow
-
-    - name: Keep Runner Alive
-      run: |
-        Start-Sleep -Seconds 21600
+      - name: 💠 Final Status
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "✅ EnigMano Instance $env:INSTANCE_ID completed execution."
+          Write-Host "🔋 Powered by: SHAHZAIB-YT"
+          Write-Host "🏁 EnigMano deployment executed with tactical precision."
